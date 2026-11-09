@@ -49,6 +49,7 @@ import {
   IconButton,
   Input,
   Pencil,
+  Plug,
   Popover,
   RotateCcw,
   Select,
@@ -118,6 +119,7 @@ import { AgentChatColorRow } from "../settings/ChatColorSetting";
 import { AgentDeleteHistoryDialog } from "./AgentDeleteHistoryDialog";
 import { type AgentFolderCalls, AgentFoldersPage, AgentFoldersRow, createAgentFolders } from "./AgentFolders";
 import { AgentNewChatDialog } from "./AgentNewChatDialog";
+import { type AgentPluginCalls, AgentPlugins } from "./AgentPlugins";
 import { BackupModelsPage } from "./BackupModels";
 
 export interface AgentRuntimeSettings {
@@ -143,6 +145,7 @@ export interface AgentSettingsPanelProps {
   onUpdatePermissions?: ((input: UpdateAgentAdminSettingsInput) => Promise<void>) | undefined;
   /** Computer Use is local-only too, and no remote host administers it yet. */
   computerUseEditable?: boolean;
+  plugins?: AgentPluginCalls;
   /** Local scripts can be changed locally or through the host's administrator route. */
   automationEditable?: boolean;
   /** Whether the agent can start a new chat. Local-only: the Team API does not carry it. */
@@ -258,9 +261,10 @@ const INSTRUCTIONS_SAVE_DELAY_MS = 400;
  * The pages behind the root list. The root edits the agent's face, name, title and instructions
  * in place, as the mobile app does, and shows one row for each page.
  */
-type AgentSettingsPage = "permissions" | "folders" | "backup-models" | "advanced";
+type AgentSettingsPage = "plugins" | "permissions" | "folders" | "backup-models" | "advanced";
 
 const PAGE_TITLE: Record<AgentSettingsPage, AppTextKey> = {
+  plugins: "agentSettings.plugins.title",
   permissions: "agentSettings.permissions.title",
   folders: "agentSettings.folders.title",
   "backup-models": "agentSettings.backupModels.title",
@@ -1431,6 +1435,14 @@ export default function AgentSettingsPanel(props: AgentSettingsPanelProps) {
               </Show>
               {props.links}
               <SettingsLinkGroup inset title={t("agentSettings.groups.rules")}>
+                <Show when={props.plugins}>
+                  <SettingsLinkRow
+                    ref={pageRowRef("plugins")}
+                    icon={<Plug aria-hidden="true" />}
+                    label={t("agentSettings.plugins.title")}
+                    onClick={() => openPage("plugins")}
+                  />
+                </Show>
                 <SettingsLinkRow
                   ref={pageRowRef("permissions")}
                   icon={<ShieldCheck aria-hidden="true" />}
@@ -1470,6 +1482,9 @@ export default function AgentSettingsPanel(props: AgentSettingsPanelProps) {
                   </>
                 )}
               </Show>
+            </Show>
+            <Show when={page() === "plugins"}>
+              <Show when={props.plugins}>{(api) => <AgentPlugins agentId={props.agent.id} api={api()} />}</Show>
             </Show>
             <Show when={page() === "permissions"}>
               <Show when={props.onUpdatePermissions}>

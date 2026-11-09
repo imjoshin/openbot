@@ -1,6 +1,14 @@
 import { defineMessages } from "../../message";
 
 export const messages = defineMessages("agentSettings", {
+  "agentSettings.plugins.title": "Plugins",
+  "agentSettings.plugins.description":
+    "Choose which plugins this agent can use. New connections are allowed by default.",
+  "agentSettings.plugins.unavailable": "Off in Server settings",
+  "agentSettings.plugins.empty": "No plugins connected.",
+  "agentSettings.plugins.readFailed": "Could not read plugins.",
+  "agentSettings.plugins.saveFailed": "Could not save plugin access.",
+
   "agentSettings.session.title": "Provider settings",
   "agentSettings.session.readFailed": "Could not read provider settings.",
   "agentSettings.session.pending": "Saved changes apply before the next turn.",

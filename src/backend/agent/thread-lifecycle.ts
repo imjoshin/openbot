@@ -1236,7 +1236,7 @@ export class ThreadLifecycle {
 
   /** The enabled servers this agent is given. Without Computer Use the fingerprint changes, so Codex replaces the session. */
   #agentMcpServers(agent: AgentSummary): readonly McpServerConfig[] {
-    return agentMcpServers(this.#mcpServers(), agentComputerUseEnabled(agent));
+    return agentMcpServers(this.#mcpServers(), agentComputerUseEnabled(agent), agent.disabledMcpServerIds);
   }
 
   /**
@@ -1262,8 +1262,13 @@ export class ThreadLifecycle {
    * The agent, for Claude and the ACP clients, which read the servers themselves. Codex gets its
    * servers from `codexConfigEffect` and takes the params as they are, so it is told nothing.
    */
-  #mcpAgentParam(agent: AgentSummary, client: AgentClient): { openbotAgentId?: string } {
-    return client.provider === "codex" ? {} : { openbotAgentId: agent.id };
+  #mcpAgentParam(
+    agent: AgentSummary,
+    client: AgentClient,
+  ): { openbotAgentId?: string; disabledMcpServerIds?: string[] } {
+    return client.provider === "codex"
+      ? {}
+      : { openbotAgentId: agent.id, disabledMcpServerIds: agent.disabledMcpServerIds ?? [] };
   }
 
   private readonly hasCurrentToolsEffect = Effect.fn("ThreadLifecycle.hasCurrentTools")(function* (

@@ -40,6 +40,7 @@ import {
   agentComputerUseEnabled,
   agentNewChatAllowed,
   agentQuickAcknowledgementEnabled,
+  GITHUB_CONNECTOR_MCP_SERVER_ID,
   isMessageReaction,
   marketplaceSuggestionItemType,
   mcpSignInItemType,
@@ -121,6 +122,7 @@ import {
   isMcpServerTool,
   type MarketplaceAppServer,
   marketplaceAppStatus,
+  restrictAgentMcpServers,
   searchSignIns,
 } from "./mcp-tools";
 import {
@@ -779,10 +781,22 @@ export class OpenBotToolRouter {
    * the provider declares them. Pi tells this for each thread. Codex defers each MCP server except
    * Computer Use (#4468), so one saved server that is on is enough.
    */
+  #agentMcpTools(agentId: string | null | undefined): AgentMcpServers | null {
+    if (!agentId || !this.#mcpServers) return null;
+    return restrictAgentMcpServers(
+      this.#mcpServers,
+      () => this.#requireAgent(agentId).disabledMcpServerIds ?? [],
+      () => this.#hooks.enabledMcpServers(),
+    );
+  }
+
   #deferredMcpNote(client: AgentClient, threadId: string): string | null {
     if (client.deferredMcpTools?.(threadId)) return DEFERRED_MCP_NOTE;
     if (client.provider !== "codex") return null;
-    return codexDeferredMcpServers(this.#mcpServers?.list() ?? []).length > 0 ? CODEX_DEFERRED_MCP_NOTE : null;
+    return codexDeferredMcpServers(this.#agentMcpTools(this.#conversation.agentForThread(threadId))?.list() ?? [])
+      .length > 0
+      ? CODEX_DEFERRED_MCP_NOTE
+      : null;
   }
 
   /**
@@ -1221,7 +1235,11 @@ export class OpenBotToolRouter {
    * headers can hold secrets.
    */
 
-  readonly #readAgent = Effect.fn("OpenBotToolRouter.readAgent")(function* (this: OpenBotToolRouter, agentId: string) {
+  readonly #readAgent = Effect.fn("OpenBotToolRouter.readAgent")(function* (
+    this: OpenBotToolRouter,
+    agentId: string,
+    callerId: string,
+  ) {
     const agent = yield* toolStep(() => this.#requireAgent(agentId));
     const computerUse = agentComputerUseEnabled(agent);
     let skills: unknown[] | undefined;
@@ -1271,7 +1289,10 @@ export class OpenBotToolRouter {
         schedule: routine.trigger.schedule,
         nextRunAt: routine.trigger.nextRunAt,
       })),
-      mcpServers: agentMcpServers(this.#hooks.enabledMcpServers(), computerUse).map((server) => ({
+      mcpServers: agentMcpServers(this.#hooks.enabledMcpServers(), computerUse, [
+        ...(agent.disabledMcpServerIds ?? []),
+        ...(this.#requireAgent(callerId).disabledMcpServerIds ?? []),
+      ]).map((server) => ({
         name: server.name,
         transport: server.transport,
       })),
@@ -1540,7 +1561,7 @@ export class OpenBotToolRouter {
 
     if (params.tool === "read_agent") {
       const args = readAgentToolSchema.parse(params.arguments ?? {});
-      const payload = yield* this.#readAgent(args.agentId ?? senderAgentId);
+      const payload = yield* this.#readAgent(args.agentId ?? senderAgentId, senderAgentId);
       return { success: true, contentItems: [{ type: "inputText", text: redactText(JSON.stringify(payload)) }] };
     }
 
@@ -1717,9 +1738,17 @@ export class OpenBotToolRouter {
           next: "Marketplace has no app with this name. Call this again only with a listed name for the same service, such as brave-search for Brave. Otherwise say that Marketplace has no app for it, and do not mention a card or an install.",
         });
       }
+      if (
+        args.app === "github" &&
+        this.#requireAgent(senderAgentId).disabledMcpServerIds?.includes(GITHUB_CONNECTOR_MCP_SERVER_ID)
+      )
+        return openBotToolFailure(sourceText("error.agent.pluginAccessDenied"));
       const installed = this.#marketplaceAppServer(args.app);
-      if (installed && this.#mcpServers)
-        return yield* marketplaceAppStatus(this.#mcpServers, installed, (config) =>
+      const servers = this.#agentMcpTools(senderAgentId);
+      if (installed && this.#requireAgent(senderAgentId).disabledMcpServerIds?.includes(installed.config.id))
+        return openBotToolFailure(sourceText("error.agent.pluginAccessDenied"));
+      if (installed && servers)
+        return yield* marketplaceAppStatus(servers, installed, (config) =>
           toolStep(() => this.#postMcpSignInCard(senderAgentId, executionThreadId, params.turnId, config)),
         );
       this.#postSystemCard(senderAgentId, executionThreadId, params.turnId, {
@@ -1985,7 +2014,7 @@ export class OpenBotToolRouter {
     params: DynamicToolCallParams,
   ) {
     const agentId = this.#conversation.agentForThread(params.threadId);
-    const servers = this.#mcpServers;
+    const servers = this.#agentMcpTools(agentId);
     if (!agentId || !servers || !isMcpServerTool(params.tool))
       return openBotToolFailure(sourceText("error.agent.toolRequestInvalid"));
     const threadId = this.#conversation.publicThreadId(agentId, params.threadId);
@@ -2023,7 +2052,7 @@ export class OpenBotToolRouter {
     agentId: string,
     params: DynamicToolCallParams,
   ) {
-    const servers = this.#mcpServers;
+    const servers = this.#agentMcpTools(agentId);
     if (!servers || params.tool !== "tool_search") return [];
     const configs = servers.list();
     const names = new Set(

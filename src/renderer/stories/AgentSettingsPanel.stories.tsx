@@ -170,3 +170,28 @@ export const SaveFailure: Story = {
     }),
   },
 };
+
+/** The same navigation and switches as the local desktop, with a saved per-agent list. */
+export const Plugins: Story = {
+  render: (args) => {
+    let rows = [
+      { id: "composio", name: "Composio", enabled: true, available: true },
+      { id: "github", name: "GitHub", enabled: false, available: true },
+      { id: "calendar", name: "Calendar", enabled: true, available: false },
+    ];
+    return (
+      <main class="agent-memories-story-stage">
+        <AgentSettingsPanel
+          {...args}
+          plugins={{
+            read: async () => rows,
+            set: async ({ pluginId, enabled }) => {
+              rows = rows.map((row) => (row.id === pluginId ? { ...row, enabled } : row));
+              return rows;
+            },
+          }}
+        />
+      </main>
+    );
+  },
+};

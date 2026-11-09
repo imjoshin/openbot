@@ -2379,6 +2379,23 @@ export function createMockOpenBot(options: MockOpenBotOptions = {}): MockOpenBot
         const { agent } = await api.agentTemplates.install(input);
         return { id: agent.id, name: agent.name };
       },
+      listAgentPlugins: async (agentId) =>
+        mcpServers.map((config) => ({
+          id: config.id,
+          name: config.name,
+          enabled: !agents.find((agent) => agent.id === agentId)?.disabledMcpServerIds?.includes(config.id),
+          available: config.enabled,
+        })),
+      setAgentPlugin: async ({ agentId, pluginId, enabled }) => {
+        const agent = agents.find((candidate) => candidate.id === agentId);
+        if (!agent || !mcpServers.some((config) => config.id === pluginId))
+          throw new Error(sourceText("error.agent.pluginAccessInvalid"));
+        const disabled = new Set(agent.disabledMcpServerIds ?? []);
+        if (enabled) disabled.delete(pluginId);
+        else disabled.add(pluginId);
+        agent.disabledMcpServerIds = [...disabled];
+        return api.agent.listAgentPlugins(agentId);
+      },
       listMcpServers: async () => clone(mcpServers),
       saveMcpServer: async ({ config }) => {
         const normalized = normalizeMcpConfig(config);

@@ -70,6 +70,7 @@ import { agentFolderIpcHandlers } from "./ipc/agent-folder-handlers";
 import { agentIpcHandlers } from "./ipc/agent-handlers";
 import { agentImportIpcHandlers } from "./ipc/agent-import-handlers";
 import { agentInstructionsIpcHandlers } from "./ipc/agent-instructions-handlers";
+import { agentPluginIpcHandlers } from "./ipc/agent-plugin-handlers";
 import { agentTemplateIpcHandlers } from "./ipc/agent-template-handlers";
 import { appIpcHandlers } from "./ipc/app-handlers";
 import { attachmentIpcHandlers } from "./ipc/attachment-handlers";
@@ -885,6 +886,7 @@ function registerIpcHandlers({
     }),
     ...accountIpcHandlers({ centralAuth, host }),
     ...skillIpcHandlers({ skills, getMainWindow: getDialogParent, translate: language.translate }),
+    ...agentPluginIpcHandlers({ service }),
     ...agentFolderIpcHandlers({
       folders: agentFolders,
       remoteServers,

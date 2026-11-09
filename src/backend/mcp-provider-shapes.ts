@@ -169,11 +169,24 @@ function unusableDrop(server: UnusableMcpServer): McpServerDrop {
 }
 
 /**
- * The configurations one agent is given: all of them, or all but Computer Use when the user turned
- * it off for that agent.
+ * The configurations allowed for this agent, including its separate Computer Use setting.
  */
-export function agentMcpServers(configs: readonly McpServerConfig[], computerUse: boolean): readonly McpServerConfig[] {
-  return computerUse ? configs : configs.filter((config) => config.id !== COMPUTER_USE_MCP_SERVER_ID);
+export function agentMcpServers(
+  configs: readonly McpServerConfig[],
+  computerUse: boolean,
+  disabledIds: readonly string[] = [],
+): readonly McpServerConfig[] {
+  const disabled = new Set(disabledIds);
+  return configs.filter(
+    (config) => !disabled.has(config.id) && (computerUse || config.id !== COMPUTER_USE_MCP_SERVER_ID),
+  );
+}
+
+/** Internal provider parameters, sent on both start and resume. */
+export function disabledMcpServersParam(params: unknown): string[] {
+  return isDynamicRecord(params) && Array.isArray(params.disabledMcpServerIds)
+    ? params.disabledMcpServerIds.filter((id): id is string => typeof id === "string")
+    : [];
 }
 
 /**

@@ -18,6 +18,7 @@ import {
   type McpServerToolName,
   marketplaceAppStatus,
   mcpServersFromGateway,
+  restrictAgentMcpServers,
 } from "../src/backend/agent/mcp-tools";
 import { runCauseEffect } from "../src/backend/effect-boundary";
 import { McpServerStore } from "../src/backend/mcp-server-store";
@@ -364,6 +365,50 @@ try {
   const everything = JSON.stringify(calls.map(({ result, approvals }) => ({ result, approvals })));
   assert.ok(!everything.includes(URL_SECRET), "the address query reached the agent");
   assert.ok(!everything.includes(HEADER_SECRET), "a header value reached the agent");
+  // A restricted bot must not discover, probe, edit, or clone the blocked connection.
+  let denied = [readyApp.id];
+  const restricted = restrictAgentMcpServers(tools, () => denied);
+  assert.ok(!restricted.list().some((config) => config.id === readyApp.id));
+  const otherAccount = store.save({
+    ...readyApp,
+    id: "",
+    name: "another-account",
+    headers: [{ key: "Authorization", value: "another-test-account" }],
+  });
+  assert.ok(restricted.list().some((config) => config.id === otherAccount.id));
+  assert.equal((await runCauseEffect(restricted.inspect(otherAccount))).error, null);
+  for (const [tool, args] of [
+    ["test_mcp_server", { name: readyApp.name }],
+    ["set_mcp_server_enabled", { name: readyApp.name, enabled: true }],
+    ["remove_mcp_server", { name: readyApp.name }],
+    ["save_mcp_server", { name: readyApp.name, url: readyApp.url }],
+    ["save_mcp_server", { name: "renamed-copy", url: readyApp.url }],
+  ] as const) {
+    const result = await runCauseEffect(
+      handleMcpServerTool(restricted, {
+        tool,
+        arguments: args,
+        approve: () => Effect.succeed(true),
+        requestSignIn: () => Effect.void,
+      }),
+    );
+    assert.equal(result.success, false, `${tool} must refuse a blocked plugin`);
+  }
+  const blockedApp = await runCauseEffect(
+    marketplaceAppStatus(restricted, { config: readyApp, setupSteps: [] }, () => Effect.void),
+  );
+  assert.equal(blockedApp.success, false);
+  denied = [];
+  assert.ok(restricted.list().some((config) => config.id === readyApp.id));
+  const allowed = await runCauseEffect(
+    handleMcpServerTool(restricted, {
+      tool: "test_mcp_server",
+      arguments: { name: readyApp.name },
+      approve: () => Effect.succeed(true),
+      requestSignIn: () => Effect.void,
+    }),
+  );
+  assert.equal(allowed.success, true);
   report.passed = true;
 } catch (error) {
   report.failures.push(error instanceof Error ? (error.stack ?? error.message) : String(error));
@@ -371,7 +416,7 @@ try {
   report.refreshes = refreshes;
   await Promise.all(Object.values(servers).map((server) => server.close()));
   database.close();
-  await rm(root, { recursive: true, force: true });
+  await rm(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
   await mkdir(OUT, { recursive: true });
   await writeFile(join(OUT, "report.json"), `${JSON.stringify(report, null, 2)}\n`);
 }

@@ -1,6 +1,10 @@
 import { defineMessages } from "../../../message";
 
 export const messages = defineMessages("error.agent", {
+  "error.agent.pluginAccessInvalid": "Invalid plugin settings.",
+  "error.agent.pluginAccessDenied": "This plugin is not available to this agent.",
+  "error.agent.pluginAccessBusy": "Stop this agent or wait for its work to finish before changing plugin access.",
+
   "error.agent.historyUnavailable":
     "History is unavailable for this request. Read recent history again, or use channel_history for channel work.",
   "error.agent.toolRequestInvalid":

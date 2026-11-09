@@ -58,6 +58,7 @@ import {
   isAvatarSeed,
   isBrowserProfileId,
   isBusyMessageMode,
+  isDisabledMcpServerIds,
   isHiddenAt,
   isProviderAccountId,
   isReasoningEffort,
@@ -428,6 +429,7 @@ export class AgentStore {
             : folder,
         );
       record.computerUse = source.computerUse;
+      if (source.disabledMcpServerIds) record.disabledMcpServerIds = [...source.disabledMcpServerIds];
       if (source.busyMessageMode) record.busyMessageMode = source.busyMessageMode;
       if (source.taskLimit !== undefined) record.taskLimit = source.taskLimit;
       if (source.backupModels) record.backupModels = structuredClone(source.backupModels);
@@ -697,6 +699,8 @@ export class AgentStore {
   updateAgent = Effect.fn("AgentStore.updateAgent")(function* (
     this: AgentStore,
     input: UpdateAgentInput & {
+      /** Set only by the local plugin settings operation. */
+      disabledMcpServerIds?: string[];
       /** The model to go back to after a usage limit. `null` removes it. */
       usageLimitReturn?: AgentUsageLimitReturn | null;
       /** The provider to use from the next turn. `null` removes it. */
@@ -755,6 +759,11 @@ export class AgentStore {
         if (!isAgentAdditionalFolders(input.excludedFolders)) throw new Error("Invalid agent folders.");
         if (input.excludedFolders.length === 0) delete next.excludedFolders;
         else next.excludedFolders = [...input.excludedFolders];
+      }
+      if (input.disabledMcpServerIds !== undefined) {
+        if (!isDisabledMcpServerIds(input.disabledMcpServerIds))
+          throw new Error(sourceText("error.agent.pluginAccessInvalid"));
+        next.disabledMcpServerIds = [...new Set(input.disabledMcpServerIds)].sort();
       }
       if (input.computerUse !== undefined) {
         if (!isBoolean(input.computerUse)) throw new Error("Invalid Computer Use value.");
@@ -891,6 +900,7 @@ export class AgentStore {
         this.#persist(modelChange ? "agent.model-changed" : "agent.updated", modelChange);
       } catch (error) {
         Object.assign(agent, previous);
+        if (previous.disabledMcpServerIds === undefined) delete agent.disabledMcpServerIds;
         if (previous.busyMessageMode === undefined) delete agent.busyMessageMode;
         if (previous.taskLimit === undefined) delete agent.taskLimit;
         if (previous.providerAccountId === undefined) delete agent.providerAccountId;
@@ -1983,6 +1993,7 @@ function isStoredAgent(value: unknown): value is PersistedStoredAgent {
     (record.access === undefined || isAgentAccess(record.access)) &&
     (record.additionalFolders === undefined || isAgentAdditionalFolders(record.additionalFolders)) &&
     (record.excludedFolders === undefined || isAgentAdditionalFolders(record.excludedFolders)) &&
+    (record.disabledMcpServerIds === undefined || isDisabledMcpServerIds(record.disabledMcpServerIds)) &&
     (record.computerUse === undefined || isBoolean(record.computerUse)) &&
     (record.allowAutomation === undefined || isBoolean(record.allowAutomation)) &&
     (record.allowNewChat === undefined || isBoolean(record.allowNewChat)) &&
@@ -2035,6 +2046,9 @@ function readStoredAgent(value: unknown): ReadStoredAgent | UnreadableStoredAgen
   const id = value.id;
   if (!isString(id) || !isValidAgentId(id)) return { unreadable: "id", id: null };
   if (!isString(value.workspacePath)) return { unreadable: "workspacePath", id };
+  // An unreadable deny list must never become unrestricted access after restart.
+  if (value.disabledMcpServerIds !== undefined && !isDisabledMcpServerIds(value.disabledMcpServerIds))
+    return { unreadable: "profile", id };
   if (value.threadId !== null && !isString(value.threadId)) return { unreadable: "threadId", id };
 
   const repaired: string[] = [];
@@ -2171,6 +2185,7 @@ function readStoredAgent(value: unknown): ReadStoredAgent | UnreadableStoredAgen
     ...(additionalFolders === undefined || additionalFolders.length === 0 ? {} : { additionalFolders }),
     ...(excludedFolders === undefined || excludedFolders.length === 0 ? {} : { excludedFolders }),
     ...(computerUse === undefined ? {} : { computerUse }),
+    ...(value.disabledMcpServerIds === undefined ? {} : { disabledMcpServerIds: [...value.disabledMcpServerIds] }),
     ...(allowAutomation === undefined ? {} : { allowAutomation }),
     ...(allowNewChat === undefined ? {} : { allowNewChat }),
     ...(quickAcknowledgement === undefined ? {} : { quickAcknowledgement }),

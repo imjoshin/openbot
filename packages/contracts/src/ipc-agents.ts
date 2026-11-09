@@ -12,6 +12,7 @@ import {
   isAvatarSeed,
   isReasoningEffort,
 } from "./ipc-agent-identity";
+import { isDisabledMcpServerIds } from "./ipc-agent-plugins";
 import {
   type AgentSessionSettingOverrides,
   isAgentSessionSettingOverrides,
@@ -262,6 +263,8 @@ export function isAgentMarketplaceSource(value: unknown): value is NonNullable<A
 }
 
 export interface AgentSummary {
+  /** Local-only. Absent or empty allows all MCP plugins, including new connections. */
+  disabledMcpServerIds?: string[];
   id: string;
   name: string;
   title: string;
@@ -414,6 +417,7 @@ function hasAgentSummaryFields(value: DynamicRecord): boolean {
     (value.access === undefined || isAgentAccess(value.access)) &&
     (value.additionalFolders === undefined || isAgentAdditionalFolders(value.additionalFolders)) &&
     (value.excludedFolders === undefined || isAgentAdditionalFolders(value.excludedFolders)) &&
+    (value.disabledMcpServerIds === undefined || isDisabledMcpServerIds(value.disabledMcpServerIds)) &&
     (value.computerUse === undefined || isBoolean(value.computerUse)) &&
     (value.allowAutomation === undefined || isBoolean(value.allowAutomation)) &&
     (value.allowNewChat === undefined || isBoolean(value.allowNewChat)) &&

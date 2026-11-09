@@ -1,4 +1,13 @@
 {
+  "agentSettings.plugins.title": ["de", "es", "fr", "it", "ja", "ko", "nl", "pl", "pt", "ru", "tr", "zh"],
+  "agentSettings.plugins.description": ["de", "es", "fr", "it", "ja", "ko", "nl", "pl", "pt", "ru", "tr", "zh"],
+  "agentSettings.plugins.unavailable": ["de", "es", "fr", "it", "ja", "ko", "nl", "pl", "pt", "ru", "tr", "zh"],
+  "agentSettings.plugins.empty": ["de", "es", "fr", "it", "ja", "ko", "nl", "pl", "pt", "ru", "tr", "zh"],
+  "agentSettings.plugins.readFailed": ["de", "es", "fr", "it", "ja", "ko", "nl", "pl", "pt", "ru", "tr", "zh"],
+  "agentSettings.plugins.saveFailed": ["de", "es", "fr", "it", "ja", "ko", "nl", "pl", "pt", "ru", "tr", "zh"],
+  "error.agent.pluginAccessInvalid": ["de", "es", "fr", "it", "ja", "ko", "nl", "pl", "pt", "ru", "tr", "zh"],
+  "error.agent.pluginAccessDenied": ["de", "es", "fr", "it", "ja", "ko", "nl", "pl", "pt", "ru", "tr", "zh"],
+  "error.agent.pluginAccessBusy": ["de", "es", "fr", "it", "ja", "ko", "nl", "pl", "pt", "ru", "tr", "zh"],
   "account.login.companyDescription": ["de", "es", "fr", "it", "ja", "ko", "nl", "pl", "pt", "ru", "tr", "zh"],
   "account.login.companyOpenAgain": ["de", "es", "fr", "it", "ja", "ko", "nl", "pl", "pt", "ru", "tr", "zh"],
   "account.login.companyOpenFailed": ["de", "es", "fr", "it", "ja", "ko", "nl", "pl", "pt", "ru", "tr", "zh"],

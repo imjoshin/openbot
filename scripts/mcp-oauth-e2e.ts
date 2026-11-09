@@ -640,7 +640,7 @@ async function proxyCases(auth: Awaited<ReturnType<typeof startAuthorizationServ
         }),
     };
     // Read at each `initialize`, so a rename here shows in the next session.
-    const agents = [
+    const agents: Array<{ id: string; name: string; disabledMcpServerIds?: string[] }> = [
       { id: "agent-research", name: "Research Bot" },
       { id: "chief", name: "Ops\u0007\n\u202eBot" },
     ];
@@ -757,6 +757,20 @@ async function proxyCases(auth: Awaited<ReturnType<typeof startAuthorizationServ
     assert.equal(await rawPost(directRoute.url, { authorization: `Bearer ${researchRoute.bearer}` }), 403);
     assert.equal(await rawPost(chiefRoute.url, { authorization: `Bearer ${researchRoute.bearer}` }), 403);
     assert.equal(resource.hits.length, hitsBeforeCross, "A request with another route's bearer reached the server.");
+    // A route already handed to a provider checks the agent's current permission on each call.
+    const restrictedClient = await connect(researchRoute.url, researchRoute.bearer);
+    research.disabledMcpServerIds = [direct.id];
+    const hitsBeforeOff = resource.hits.length;
+    assert.ok("error" in (await runCauseEffect(gateway.endpoint(direct, research.id))));
+    await assert.rejects(restrictedClient.callTool({ name: "echo", arguments: { text: "blocked" } }));
+    assert.equal(resource.hits.length, hitsBeforeOff, "A blocked agent reached the upstream MCP server.");
+    assert.equal(await titleOf(chiefRoute), "Ops Bot (OpenBot)");
+    research.disabledMcpServerIds = [];
+    assert.equal(
+      textOf(await restrictedClient.callTool({ name: "echo", arguments: { text: "allowed again" } })),
+      "allowed again",
+    );
+    const pluginAccess = { blockedUpstreamRequests: 0, otherAgentAllowed: true, reEnabled: true };
     const clientIdentity = {
       withoutAgent: "OpenBot",
       agent: "Research Bot (OpenBot)",
@@ -906,6 +920,7 @@ async function proxyCases(auth: Awaited<ReturnType<typeof startAuthorizationServ
       echo,
       getStream,
       clientIdentity,
+      pluginAccess,
       refused,
       midSessionRefresh,
       accountRefresh,

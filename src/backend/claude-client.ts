@@ -96,6 +96,7 @@ import {
   type ClaudeMcpServer,
   claudeMcpServers,
   computerUseParam,
+  disabledMcpServersParam,
   type McpDropReporter,
   type McpEndpointSource,
   type McpServerSource,
@@ -308,6 +309,7 @@ interface ThreadConfig {
   profileGeneration: boolean;
   /** Part of the config so that a change restarts the query with the new servers. */
   computerUse: boolean;
+  disabledMcpServerIds: string[];
   /**
    * Workspace only: Bash runs in the Claude sandbox, a file write outside the roots asks the user, and
    * the project settings do not load. See `claude-workspace-sandbox.ts`.
@@ -1154,7 +1156,7 @@ export class ClaudeAgentClient extends EventEmitter<ClientEvents> {
       ? null
       : claudeMcpServers(
           yield* usableMcpServers(
-            agentMcpServers(this.#mcpServers(), config.computerUse),
+            agentMcpServers(this.#mcpServers(), config.computerUse, config.disabledMcpServerIds),
             this.#mcpToolRuntimes?.(),
             this.#mcpEndpoint,
             config.agentId,
@@ -2802,6 +2804,7 @@ function readThreadConfig(params: unknown): ThreadConfig {
     persistSession: !isRecord(params) || params.persistSession !== false,
     profileGeneration: isRecord(params) && params.profileGeneration === true,
     computerUse: computerUseParam(params),
+    disabledMcpServerIds: disabledMcpServersParam(params),
     workspaceOnly: isRecord(params) && params.workspaceOnly === true,
     excludedFolders:
       isRecord(params) && Array.isArray(params.excludedFolders)

@@ -23,6 +23,7 @@ import {
   acpMcpServers,
   agentMcpServers,
   computerUseParam,
+  disabledMcpServersParam,
   type McpDropReporter,
   type McpEndpointSource,
   type McpServerSource,
@@ -522,6 +523,7 @@ export class MuseAgentClient extends EventEmitter<ClientEvents> implements Agent
         agentMcpServers(
           this.#options.profileGeneration ? [] : (this.#options.mcpServers?.() ?? []),
           computerUseParam(params),
+          disabledMcpServersParam(params),
         ),
         this.#options.mcpToolRuntimes?.(),
         this.#options.mcpEndpoint,

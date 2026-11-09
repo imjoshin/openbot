@@ -15,6 +15,7 @@ import type {
   AgentModelId,
   AgentModelOption,
   AgentPendingRuntime,
+  AgentPlugin,
   AgentReasoningEffort,
   AgentRuntimeSnapshot,
   AgentSessionSettings,
@@ -95,6 +96,7 @@ import type {
   SentMessageStats,
   SetAgentHiddenInput,
   SetAgentMemoryInclusionInput,
+  SetAgentPluginInput,
   SetAgentSessionSettingInput,
   SetMcpServerEnabledInput,
   SetMessageReactionInput,
@@ -125,6 +127,7 @@ import {
   agentNewChatAllowed,
   agentTaskLimit,
   type BusyMessageMode,
+  COMPUTER_USE_MCP_SERVER_ID,
   CONTEXT_RESET_ITEM_TYPE,
   DEFAULT_BUSY_MESSAGE_MODE,
   DEFAULT_CUSTOM_PROVIDER_HARNESS,
@@ -2294,6 +2297,65 @@ export class AgentService extends EventEmitter<AgentServiceEvents> {
    * Configurations only: OpenBot holds no connection of its own to report. A connection is made
    * when the user asks for a test, and when an agent starts - and the second is the provider's own.
    */
+  listAgentPlugins(agentId: string): AgentPlugin[] {
+    const agent = this.#conversation.requireKnownAgent(agentId);
+    const configs = new Map([...this.#mcp.list(), ...this.#mcp.enabled()].map((config) => [config.id, config]));
+    return [...configs.values()]
+      .filter((config) => config.id !== COMPUTER_USE_MCP_SERVER_ID)
+      .map((config) => ({
+        id: config.id,
+        name: config.name,
+        enabled: !agent.disabledMcpServerIds?.includes(config.id),
+        available: config.enabled,
+      }));
+  }
+
+  /** Hold new starts while replacing every idle session that held the previous tool set. */
+  readonly setAgentPlugin = Effect.fn("AgentService.setAgentPlugin")(function* (
+    this: AgentService,
+    input: SetAgentPluginInput,
+  ) {
+    return yield* Effect.acquireUseRelease(
+      Effect.sync(() => this.#drain.holdSessionSettings(input.agentId)),
+      () =>
+        Effect.gen({ self: this }, function* () {
+          yield* this.#drain.taskFor(input.agentId)?.pipe(Effect.ignore) ?? Effect.void;
+          return yield* this.#endpoints.runExclusive(() =>
+            Effect.gen({ self: this }, function* () {
+              const agent = yield* lifecycleStep("set plugin access", () => {
+                const current = this.#conversation.requireKnownAgent(input.agentId);
+                if (!this.listAgentPlugins(input.agentId).some((plugin) => plugin.id === input.pluginId))
+                  throw new Error(sourceText("error.agent.pluginAccessInvalid"));
+                if (
+                  this.#runsTurn(input.agentId) ||
+                  this.#turn.subagentTurns(new Set([input.agentId])).length > 0 ||
+                  this.#threads.providerContextBusy(current) ||
+                  this.#mailbox.hasStartedDelivery(input.agentId)
+                )
+                  throw new Error(sourceText("error.agent.pluginAccessBusy"));
+                return current;
+              });
+              const disabled = new Set(agent.disabledMcpServerIds ?? []);
+              if (input.enabled) disabled.delete(input.pluginId);
+              else disabled.add(input.pluginId);
+              yield* this.#store
+                .updateAgent({ agentId: agent.id, disabledMcpServerIds: [...disabled] })
+                .pipe(
+                  Effect.mapError(
+                    (failure) => new AgentLifecycleFailed({ operation: "set plugin access", cause: failure.cause }),
+                  ),
+                );
+              yield* this.#threads.refreshAgentRuntime(agent.id);
+              this.#conversation.unloadAgentThreads(agent.id);
+              this.#emit({ type: "agents-changed", agents: this.listAgents() });
+              return this.listAgentPlugins(agent.id);
+            }),
+          );
+        }),
+      (release) => Effect.sync(release),
+    );
+  }, Effect.uninterruptible).bind(this);
+
   listMcpServers(): McpServerConfig[] {
     return this.#mcp.list();
   }

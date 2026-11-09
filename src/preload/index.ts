@@ -17,6 +17,7 @@ import {
   decodeAgentInstructionsFileFromMain,
   decodeAgentNewChatSettings,
   decodeAgentPlanCardSettings,
+  decodeAgentPluginsFromMain,
   decodeAgentProfileDraft,
   decodeAgentTaskLimitSettings,
   decodeBrowserProfileList,
@@ -1411,6 +1412,10 @@ const openbotApi: OpenBotDesktopApi = {
       previewWorkspaceFile: decodeFilePreview,
       releaseFilePreview: decodeVoid,
       listWorkspaceDirectory: decodeWorkspaceDirectory,
+    }),
+    ...bridgeGroup(IPC_ENDPOINTS.agentPlugins, {
+      listAgentPlugins: decodeAgentPluginsFromMain,
+      setAgentPlugin: decodeAgentPluginsFromMain,
     }),
     ...agentFoldersGroup,
     ...bridgeGroup(IPC_ENDPOINTS.agentInstructions, {

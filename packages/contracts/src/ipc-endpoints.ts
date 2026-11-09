@@ -5,6 +5,7 @@ import type {
   AcpRegistryOperation,
 } from "./ipc-acp-registry";
 import type { AgentAccessChange, AgentAccessSnapshot } from "./ipc-agent-access";
+import type { AgentPlugin, SetAgentPluginInput } from "./ipc-agent-plugins";
 import type {
   AgentSessionSettings,
   ResetAgentSessionSettingInput,
@@ -1882,6 +1883,10 @@ export const IPC_ENDPOINTS = {
   // The folders an agent can change besides its workspace. On a joined server the host serves them
   // through `agent-folders-v1`, for an owner or admin. The native picker shows only this computer, so
   // for a joined server the renderer lists host folders with `browseAgentFolders` and then adds one.
+  agentPlugins: {
+    listAgentPlugins: request<string, AgentPlugin[]>()("agent:plugins:list"),
+    setAgentPlugin: request<SetAgentPluginInput, AgentPlugin[]>()("agent:plugins:set"),
+  },
   agentFolders: {
     listAgentFolders: scopedRequest<string, AgentFolderList>()("agent:folders:list"),
     // Opens the folder picker in main. Only for an agent on this computer.
@@ -2283,6 +2288,7 @@ export const IPC_GROUP_PATHS = {
   channelMemories: "agent",
   channelRoutines: "agent",
   agentAttachments: "agent",
+  agentPlugins: "agent",
   agentFolders: "agent",
   agentInstructions: "agent",
   // The preload calls it from its own drop, paste, and file input handlers.

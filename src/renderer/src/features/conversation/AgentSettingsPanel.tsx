@@ -451,6 +451,14 @@ export default function AgentSettingsPanel(props: AgentSettingsPanelProps) {
   return (
     <SharedAgentSettingsPanel
       {...props}
+      plugins={
+        props.localHost
+          ? {
+              read: (agentId) => conversationPort().agent.listAgentPlugins(agentId),
+              set: (input) => conversationPort().agent.setAgentPlugin(input),
+            }
+          : undefined
+      }
       browserProfiles={browserProfileOptions()}
       notificationLevel={notificationLevelOptions()}
       width={panelWidth()}

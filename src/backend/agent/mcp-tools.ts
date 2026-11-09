@@ -53,7 +53,7 @@ const saveMcpServerToolSchema = z.strictObject({
 const namedServerSchema = z.strictObject({ name: serverName });
 const setEnabledSchema = z.strictObject({ name: serverName, enabled: z.boolean() });
 
-const MCP_SCOPE = "Every agent on this OpenBot server gets the tools of an enabled MCP server.";
+const MCP_SCOPE = "Agents get the tools of enabled MCP servers allowed in their Plugins settings.";
 const MCP_APPROVAL =
   "The user's request is the permission: call the tool without asking first. OpenBot asks the user to approve when your access needs it.";
 
@@ -133,6 +133,42 @@ export function mcpServersFromGateway(
       ),
     offersSignIn: (config) => gateway.offersSignIn(config),
     redact: (text) => gateway.redact(text),
+  };
+}
+
+export function restrictAgentMcpServers(
+  servers: AgentMcpServers,
+  disabledIds: () => readonly string[],
+  builtIn: () => readonly McpServerConfig[] = () => [],
+): AgentMcpServers {
+  const blocked = (config: McpServerConfig) => {
+    const ids = new Set(disabledIds());
+    if (ids.has(config.id)) return true;
+    // Saved connections can share an endpoint and hold different accounts. Their IDs are authoritative.
+    if (servers.list().some((saved) => saved.id === config.id)) return false;
+    return [...servers.list(), ...builtIn()].some(
+      (saved) =>
+        ids.has(saved.id) &&
+        (saved.name.toLowerCase() === config.name.toLowerCase() ||
+          (saved.transport === config.transport &&
+            (saved.transport === "stdio"
+              ? saved.command === config.command && JSON.stringify(saved.args) === JSON.stringify(config.args)
+              : saved.url === config.url))),
+    );
+  };
+  const refused = () => new ToolOperationFailed({ cause: new Error(sourceText("error.agent.pluginAccessDenied")) });
+  const check = <A>(config: McpServerConfig, run: () => Effect.Effect<A, ToolOperationFailed>) =>
+    Effect.suspend(() => (blocked(config) ? Effect.fail(refused()) : run()));
+  return {
+    list: () => servers.list().filter((config) => !blocked(config)),
+    signIns: () => servers.signIns().filter((state) => !disabledIds().includes(state.mcpServerId)),
+    save: (config) => check(config, () => servers.save(config)),
+    inspect: (config) => check(config, () => servers.inspect(config)),
+    offersSignIn: (config) => (blocked(config) ? Effect.succeed(false) : servers.offersSignIn(config)),
+    setEnabled: (id, enabled) =>
+      disabledIds().includes(id) ? Effect.fail(refused()) : servers.setEnabled(id, enabled),
+    remove: (id) => (disabledIds().includes(id) ? Effect.fail(refused()) : servers.remove(id)),
+    redact: (text) => servers.redact(text),
   };
 }
 

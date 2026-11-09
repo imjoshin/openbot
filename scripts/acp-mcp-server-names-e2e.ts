@@ -41,8 +41,8 @@ function server(id: string, name: string): McpServerConfig {
     name,
     transport: "stdio",
     enabled: true,
-    command: "/bin/sh",
-    args: ["-c", "sleep 120"],
+    command: process.platform === "win32" ? process.execPath : "/bin/sh",
+    args: process.platform === "win32" ? ["-e", "setTimeout(() => {}, 120000)"] : ["-c", "sleep 120"],
     env: [],
     envPassthrough: [],
     workingDirectory: "",
@@ -64,8 +64,8 @@ try {
     store.save({
       id: "names",
       name: "names",
-      command: executable,
-      args: [],
+      command: process.platform === "win32" ? process.execPath : executable,
+      args: process.platform === "win32" ? [resolve(import.meta.dirname, "provider-fakes/agents/mcp-names.ts")] : [],
       env: [{ name: "FAKE_LOG", value: log }],
       usagePrompt: null,
     }),
@@ -126,6 +126,27 @@ try {
     "Each changed name that is taken is reported once.",
   );
 
+  // Access changes must reach fresh sessions and replace the tool set of an already held session.
+  const params = { model, cwd: workspace, disabledMcpServerIds: ["spaced", "underscored", "home", "home-dotted"] };
+  const restricted = await startThread(client, params);
+  assert.deepEqual((await readJsonl<SessionRequest>(log)).at(-1)?.names, ["computer_use"]);
+  await runCauseEffect(
+    client.request("thread/resume", { ...params, threadId: restricted, disabledMcpServerIds: [] }, (value) => value),
+  );
+  assert.deepEqual((await readJsonl<SessionRequest>(log)).at(-1)?.names, [
+    "My_Server",
+    "computer_use",
+    "Home_Assistant",
+  ]);
+  await runCauseEffect(client.request("thread/resume", { ...params, threadId: restricted }, (value) => value));
+  assert.deepEqual((await readJsonl<SessionRequest>(log)).at(-1)?.names, ["computer_use"]);
+  await startThread(client, { model, cwd: workspace });
+  assert.deepEqual((await readJsonl<SessionRequest>(log)).at(-1)?.names, [
+    "My_Server",
+    "computer_use",
+    "Home_Assistant",
+  ]);
+  report.requests = await readJsonl<SessionRequest>(log);
   report.passed = true;
 } finally {
   await stopClients(clients);

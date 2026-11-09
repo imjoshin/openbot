@@ -73,6 +73,7 @@ import {
   acpMcpServers,
   agentMcpServers,
   computerUseParam,
+  disabledMcpServersParam,
   type McpDropReporter,
   type McpEndpointSource,
   type McpServerSource,
@@ -285,6 +286,7 @@ interface AcpThread {
   workspaceRoots: string[];
   /** Whether the session got the Computer Use server. Its MCP servers are fixed when it opens. */
   computerUse: boolean;
+  disabledMcpServerIds: string[];
   /** The agent whose session this is, named to the MCP servers that OpenBot signed in to. */
   agentId: string | null;
   idleRelease: ReturnType<typeof setTimeout> | null;
@@ -307,7 +309,13 @@ interface AcpThread {
 /** What a closed idle session needs to be loaded again. Completed history lives in storage. */
 type ReleasedAcpThread = Pick<
   AcpThread,
-  "cwd" | "developerInstructions" | "dynamicTools" | "workspaceRoots" | "computerUse" | "agentId"
+  | "cwd"
+  | "developerInstructions"
+  | "dynamicTools"
+  | "workspaceRoots"
+  | "computerUse"
+  | "disabledMcpServerIds"
+  | "agentId"
 >;
 
 /** Persistence hooks for provider history. The database owns the data; ACP only streams it. */
@@ -535,12 +543,21 @@ export class AcpAgentClient extends EventEmitter<ClientEvents> {
       this.#loadsSessions &&
       (thread.transport !== null || Boolean(this.#initialization?.agentCapabilities?.sessionCapabilities?.close)) &&
       thread.backgroundUntil === 0,
-    snapshot: ({ cwd, developerInstructions, dynamicTools, workspaceRoots, computerUse, agentId }) => ({
+    snapshot: ({
       cwd,
       developerInstructions,
       dynamicTools,
       workspaceRoots,
       computerUse,
+      disabledMcpServerIds,
+      agentId,
+    }) => ({
+      cwd,
+      developerInstructions,
+      dynamicTools,
+      workspaceRoots,
+      computerUse,
+      disabledMcpServerIds,
       agentId,
     }),
     dispose: (thread) => this.#closeSession(thread),
@@ -553,6 +570,7 @@ export class AcpAgentClient extends EventEmitter<ClientEvents> {
           dynamicTools: released.dynamicTools,
           runtimeWorkspaceRoots: released.workspaceRoots,
           computerUse: released.computerUse,
+          disabledMcpServerIds: released.disabledMcpServerIds,
           openbotAgentId: released.agentId ?? undefined,
         },
         true,
@@ -1456,6 +1474,7 @@ export class AcpAgentClient extends EventEmitter<ClientEvents> {
         dynamicTools: thread.dynamicTools,
         runtimeWorkspaceRoots: thread.workspaceRoots,
         computerUse: thread.computerUse,
+        disabledMcpServerIds: thread.disabledMcpServerIds,
         openbotAgentId: thread.agentId ?? undefined,
         model: thread.currentModelId,
       },
@@ -1555,7 +1574,9 @@ export class AcpAgentClient extends EventEmitter<ClientEvents> {
       held &&
       !recovering &&
       !held.activeTurn &&
-      (held.computerUse !== computerUseParam(params) || this.#workspaceRootsChanged(held, params))
+      (held.computerUse !== computerUseParam(params) ||
+        held.disabledMcpServerIds.join("\n") !== disabledMcpServersParam(params).join("\n") ||
+        this.#workspaceRootsChanged(held, params))
     ) {
       yield* this.#threads.close(held).pipe(toProviderClientOperationError);
     }
@@ -1607,6 +1628,7 @@ export class AcpAgentClient extends EventEmitter<ClientEvents> {
     const cwd = yield* providerSync(() => requiredString(params, "cwd"));
     const dynamicTools = getArray(params, "dynamicTools").filter(isDynamicToolNamespace);
     const computerUse = computerUseParam(params);
+    const disabledMcpServerIds = disabledMcpServersParam(params);
     const agentId = mcpAgentParam(params);
     let threadRef: AcpThread | null = null;
     let transport: AcpConnection | null = null;
@@ -1618,13 +1640,18 @@ export class AcpAgentClient extends EventEmitter<ClientEvents> {
           dynamicTools,
           () => threadRef?.activeTurn?.id ?? null,
           (call, signal) => this.#callDynamicTool(call, signal),
-          this.#flavor.mcpServersPerDirectory ? cwd : undefined,
+          this.#flavor.mcpServersPerDirectory && disabledMcpServerIds.length === 0 ? cwd : undefined,
         )
         .pipe(toProviderClientOperationError),
       (mcp) =>
         Effect.gen({ self: this }, function* () {
           try {
-            if (this.#flavor.sessionProcesses)
+            // OpenCode caches connections by directory. A restricted session gets a fresh process
+            // so an omitted server cannot survive from an earlier unrestricted session.
+            if (
+              this.#flavor.sessionProcesses ||
+              (this.#flavor.mcpServersPerDirectory && disabledMcpServerIds.length > 0)
+            )
               transport = providerResult(yield* Effect.result(this.#startSessionProcess(() => threadRef)));
             const sessionTransport = transport;
             const connection = () =>
@@ -1650,7 +1677,7 @@ export class AcpAgentClient extends EventEmitter<ClientEvents> {
               providerResult(
                 yield* Effect.result(
                   usableMcpServers(
-                    agentMcpServers(this.options.mcpServers?.() ?? [], computerUse),
+                    agentMcpServers(this.options.mcpServers?.() ?? [], computerUse, disabledMcpServerIds),
                     this.options.mcpToolRuntimes?.(),
                     this.options.mcpEndpoint,
                     agentId,
@@ -1718,6 +1745,7 @@ export class AcpAgentClient extends EventEmitter<ClientEvents> {
               dynamicTools,
               workspaceRoots: additionalDirectories,
               computerUse,
+              disabledMcpServerIds,
               agentId,
               idleRelease: null,
               idleSince: 0,
