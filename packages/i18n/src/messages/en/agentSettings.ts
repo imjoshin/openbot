@@ -1,13 +1,13 @@
 import { defineMessages } from "../../message";
 
 export const messages = defineMessages("agentSettings", {
-  "agentSettings.plugins.title": "Plugins",
+  "agentSettings.plugins.title": "Access",
   "agentSettings.plugins.description":
-    "Choose which plugins this agent can use. New connections are allowed by default.",
+    "Choose which MCP connections this agent can use. New connections are allowed by default.",
   "agentSettings.plugins.unavailable": "Off in Server settings",
-  "agentSettings.plugins.empty": "No plugins connected.",
-  "agentSettings.plugins.readFailed": "Could not read plugins.",
-  "agentSettings.plugins.saveFailed": "Could not save plugin access.",
+  "agentSettings.plugins.empty": "No MCP connections added.",
+  "agentSettings.plugins.readFailed": "Could not read access settings.",
+  "agentSettings.plugins.saveFailed": "Could not save access settings.",
 
   "agentSettings.session.title": "Provider settings",
   "agentSettings.session.readFailed": "Could not read provider settings.",

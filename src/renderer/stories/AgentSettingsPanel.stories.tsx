@@ -172,7 +172,7 @@ export const SaveFailure: Story = {
 };
 
 /** The same navigation and switches as the local desktop, with a saved per-agent list. */
-export const Plugins: Story = {
+export const Access: Story = {
   render: (args) => {
     let rows = [
       { id: "composio", name: "Composio", enabled: true, available: true },
