@@ -82,10 +82,7 @@ export function AgentPlugins(props: { agentId: string; api: AgentPluginCalls }) 
     }
   }
   return (
-    <div aria-busy={state.busy ? "true" : "false"}>
-      <Text as="p" class="agent-settings-runtime-note" variant="caption" tone="muted">
-        {t("agentSettings.plugins.description")}
-      </Text>
+    <div class="agent-settings-page" aria-busy={state.busy ? "true" : "false"}>
       <Show when={state.error}>
         {(error) => (
           <div class="agent-session-setting-notes">
@@ -101,7 +98,7 @@ export function AgentPlugins(props: { agentId: string; api: AgentPluginCalls }) 
           {t("agentSettings.plugins.empty")}
         </Text>
       </Show>
-      <SettingsLinkGroup inset class="agent-settings-runtime-rows">
+      <SettingsLinkGroup inset class="agent-settings-runtime-rows" title={t("agentSettings.plugins.title")}>
         <For each={state.rows}>
           {(plugin) => (
             <div class="agent-session-setting">
@@ -124,6 +121,9 @@ export function AgentPlugins(props: { agentId: string; api: AgentPluginCalls }) 
           )}
         </For>
       </SettingsLinkGroup>
+      <Text as="p" class="agent-settings-runtime-note" variant="caption" tone="muted">
+        {t("agentSettings.plugins.description")}
+      </Text>
     </div>
   );
 }
