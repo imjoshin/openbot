@@ -154,6 +154,8 @@ export function SettingsField(props: SettingsFieldProps): JSX.Element {
 export interface SettingsLinkGroupProps {
   /** A heading above the rows. A titled group is a region with that name. */
   title?: JSX.Element;
+  /** Help below the heading and above the rows of a titled group. */
+  description?: JSX.Element;
   /** Draws the rows in one bordered card, for a panel with several groups one after another. */
   inset?: boolean;
   class?: string;
@@ -174,6 +176,7 @@ export function SettingsLinkGroup(props: SettingsLinkGroupProps): JSX.Element {
         <h3 id={titleId} class="settings-link-section-title">
           {props.title}
         </h3>
+        {props.description}
         {rows()}
       </section>
     </Show>

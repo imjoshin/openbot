@@ -98,7 +98,16 @@ export function AgentPlugins(props: { agentId: string; api: AgentPluginCalls }) 
           {t("agentSettings.plugins.empty")}
         </Text>
       </Show>
-      <SettingsLinkGroup inset class="agent-settings-runtime-rows" title={t("agentSettings.plugins.title")}>
+      <SettingsLinkGroup
+        inset
+        class="agent-settings-runtime-rows"
+        title={t("agentSettings.plugins.title")}
+        description={
+          <Text as="p" class="agent-settings-runtime-note" variant="caption" tone="muted">
+            {t("agentSettings.plugins.description")}
+          </Text>
+        }
+      >
         <For each={state.rows}>
           {(plugin) => (
             <div class="agent-session-setting">
@@ -121,9 +130,6 @@ export function AgentPlugins(props: { agentId: string; api: AgentPluginCalls }) 
           )}
         </For>
       </SettingsLinkGroup>
-      <Text as="p" class="agent-settings-runtime-note" variant="caption" tone="muted">
-        {t("agentSettings.plugins.description")}
-      </Text>
     </div>
   );
 }
