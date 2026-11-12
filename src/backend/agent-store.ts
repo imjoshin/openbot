@@ -1139,12 +1139,14 @@ export class AgentStore {
       const record = this.#createRecord(id, name ?? titleFromId(id), title ?? "Local teammate");
       yield* storedIO(() => mkdir(record.workspacePath, { recursive: true, mode: 0o700 }));
       this.#state.agents.push(record);
+
       try {
         this.#persistNewAgent(record.id, "agent.created");
       } catch (cause) {
         this.#state.agents = this.#state.agents.filter((candidate) => candidate.id !== id);
         throw cause;
       }
+
       return { ...record };
     } catch (cause) {
       return yield* new StoredStateFailure({ cause });

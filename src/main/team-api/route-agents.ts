@@ -262,6 +262,7 @@ export async function routeAgents(
     requireVisibleProvider(input.agent);
     const { agent, policyId, expectedRevision } = input;
     const welcome = capabilities.has(AGENT_WELCOME_CAPABILITY);
+
     const created = await runCauseEffect(
       agents.createAgent(agent, undefined, undefined, memberSender(member), welcome, {
         actor: { userId: member.id, role: member.role },
@@ -272,6 +273,7 @@ export async function routeAgents(
       if (error instanceof AgentAccessPolicyFailed) throw agentAccessPolicyHttpError(error, hidden);
       throw error;
     });
+
     await recordPolicyChange(context, audit, serverId);
     return json(201, created);
   }

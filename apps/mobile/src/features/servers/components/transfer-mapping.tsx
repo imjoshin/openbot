@@ -41,6 +41,7 @@ export function TransferMapping({
   const { t, format, errorMessage } = useText();
   const { theme } = useUniwind();
   const { previewTransferMapping } = useMobileWorkspaceActions();
+
   const [agents, setAgents] = useState<Record<string, string | null>>({});
   const [connections, setConnections] = useState<Record<string, string>>({});
   const [review, setReview] = useState<{
@@ -51,17 +52,20 @@ export function TransferMapping({
   const [error, setError] = useState<string>();
   const mounted = useRef(true);
   const locked = useRef(false);
+
   useLayoutEffect(() => {
     mounted.current = true;
     return () => {
       mounted.current = false;
     };
   }, []);
+
   const busy = pending || importing;
   const complete =
     options.agents.every(({ key }) => Object.hasOwn(agents, key)) &&
     options.sourceConnections.every(({ id }) => Boolean(connections[id])) &&
     new Set(Object.values(connections)).size === options.sourceConnections.length;
+
   const name = (connection: AgentAccessPolicyTransferOptions["destinationConnections"][number]) =>
     connection.accountLabel
       ? t("mobile.server.agentGroups.connectionLabel", { name: connection.name, account: connection.accountLabel })
@@ -76,9 +80,11 @@ export function TransferMapping({
 
   async function preview() {
     if (!complete || locked.current) return;
+
     locked.current = true;
     setPending(true);
     setError(undefined);
+
     const input: AgentAccessPolicyTransferMapping = {
       ...selection,
       expectedRevision: options.revision,
@@ -88,6 +94,7 @@ export function TransferMapping({
         destinationId: connections[id] ?? "",
       })),
     };
+
     try {
       const result = await previewTransferMapping(input, serverId);
       if (mounted.current) setReview({ input, result });
@@ -159,6 +166,7 @@ export function TransferMapping({
             {options.agents.map((agent) => {
               const selected = agents[agent.key];
               const source = options.sourcePolicies.find(({ id }) => id === agent.sourcePolicyId);
+
               return (
                 <SettingsRow
                   key={agent.key}

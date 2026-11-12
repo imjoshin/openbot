@@ -729,6 +729,7 @@ try {
       await createAgent(agents, "Other agent", "claude", CLAUDE_MODEL);
       const [first, second, other] = store.list();
       assert.ok(first?.threadId && second?.threadId && other?.threadId);
+
       const session = (threadId: string) => store.database.activeProviderSession(threadId, "claude")?.externalSessionId;
       const firstId = session(first.threadId);
       const secondId = session(second.threadId);
@@ -773,10 +774,12 @@ try {
         };
         return { waiting: () => waiting, finish: finish.resolve };
       };
+
       const firstRelease = holdRelease(firstId);
       const initial = entries<{ pid: number; sessionId: string }>(claudeSpawns).length;
       const connection = claudeMcpConnection;
       const saved = runCauseEffect(agents.saveMcpServer({ config: connection }));
+
       try {
         await waitFor("first provider release", firstRelease.waiting);
         await sendTurn(profile, second.id, "affected during the first release");
@@ -787,6 +790,7 @@ try {
           opened.some((spawn) => spawn.resume === secondId && spawn.mcpNames.includes(connection.name)),
           "The affected agent resumes with the new connection while the first release waits.",
         );
+
         await sendTurn(profile, other.id, "unaffected during the first release");
         assert.ok(!agents.enabledMcpServers(other.id).some(({ name }) => name === connection.name));
         assert.equal(session(other.threadId), otherId);
@@ -807,6 +811,7 @@ try {
       const registered = (await saved).find(({ name }) => name === connection.name);
       assert.ok(registered);
       const removed = runCauseEffect(agents.removeMcpServer({ mcpServerId: registered.id }));
+
       try {
         await waitFor("second provider release", secondRelease.waiting);
         await sendTurn(profile, second.id, "resume while the old release finishes");
@@ -819,6 +824,7 @@ try {
         secondRelease.finish();
         await removed;
       }
+
       await sendTurn(profile, second.id, "keep the newly loaded session");
       details.globalRefresh = {
         affectedSawNewTools: true,
@@ -840,6 +846,7 @@ try {
       const rows = await runCauseEffect(agents.saveMcpServer({ config: claudeMcpConnection }));
       const connection = rows.find(({ name }) => name === claudeMcpConnection.name);
       assert.ok(connection);
+
       const agent = await createAgent(agents, "Background policy", "claude", CLAUDE_MODEL);
       assert.ok(agent.threadId);
       const initial = store.database.activeProviderSession(agent.threadId, "claude");
@@ -883,9 +890,11 @@ try {
           subagents?.some((child) => child.background && child.status === "completed"),
         ),
       );
+
       const saved = await Effect.runPromise(agents.agentAccessPolicy.apply(mutation, owner));
       assert.equal(saved.status, "saved");
       assert.equal(agents.agentAccessPolicy.allows(agent.id, connection.id), false);
+
       await sendTurn(profile, agent.id, "Use the updated permissions.");
       const current = store.database.activeProviderSession(agent.threadId, "claude");
       assert.ok(current && current.externalSessionId !== initial.externalSessionId);

@@ -648,6 +648,7 @@ export const messages = {
   "server.settings.responseStyleNatural": "Natural",
   "server.settings.responseStyleClassic": "Clásico",
   "server.settings.personalityLoadFailed": "No se pudo cargar la personalidad del servidor.",
+
   "server.agentGroups.permissions": "Permisos",
   "server.agentGroups.permissionsDescription": "Administra los roles y el acceso MCP de los agentes.",
   "server.agentGroups.title": "Grupos de agentes",
@@ -706,5 +707,6 @@ export const messages = {
   "server.agentGroups.reload": "Actualizar grupos",
   "server.agentGroups.selectionCleared":
     "El grupo seleccionado no está disponible. Elige un grupo antes de crear el agente.",
+
   "server.audit.agentAccessPolicy": "Cambió los permisos de los grupos de agentes.",
 } as const satisfies PartialTranslation<typeof source>;

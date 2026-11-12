@@ -34,8 +34,10 @@ const id: AdminDecoder = (value) => {
   if (typeof value !== "string" || !/^(?!__proto__$|constructor$|prototype$)[a-zA-Z0-9_-]{1,160}$/u.test(value)) {
     throw new Error("Invalid agent access policy identifier.");
   }
+
   return value;
 };
+
 const policyId = nullable(id);
 const name = string(80);
 const choices: AdminDecoder = (value) => {
@@ -44,6 +46,7 @@ const choices: AdminDecoder = (value) => {
   if (entries.length > 4096) throw new Error("Invalid agent access policy choices.");
   return Object.fromEntries(entries.map(([key, choice]) => [String(id(key)), boolean(choice)]));
 };
+
 const assignment = fields({ agentId: id, assigned: boolean, keepOverrides: boolean });
 const mutation = variant({
   savePolicy: fields({

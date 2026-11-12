@@ -768,6 +768,7 @@ export const messages = {
   "settings.transfer.result.signInButton": "Se connecter à {provider}",
   "settings.transfer.result.notImported": "Non importé",
   "settings.transfer.result.warnings": "À vérifier",
+
   "settings.transferMapping.description":
     "Choisissez un groupe de destination pour chaque agent et une destination pour chaque connexion. L’accès actuel est conservé. Les autres connexions de ce serveur restent bloquées.",
   "settings.transferMapping.agents": "Groupes de destination",

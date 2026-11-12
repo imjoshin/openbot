@@ -291,6 +291,7 @@ function waitForEvent(socket: WebSocket, accept: (event: AgentEvent | TeamRealti
       stop();
       ready();
     };
+
     socket.addEventListener("message", message);
     socket.addEventListener("close", close);
   });
@@ -302,6 +303,7 @@ async function setEventCapabilities(socket: WebSocket, capabilities: readonly st
   const withoutSnapshot = capabilities.filter((capability) => capability !== "agent-runtime-snapshots");
   const snapshot = waitForEvent(socket, (event) => event.type === "runtime-snapshot");
   socket.send(scope(withoutSnapshot));
+
   // Re-enable snapshots to confirm the host has applied the new scope on this socket.
   socket.send(scope([...withoutSnapshot, "agent-runtime-snapshots"]));
   await snapshot;
@@ -412,6 +414,7 @@ try {
     const releasedEvents = await openEvents(memberToken);
     const noCatalogEvents = await openEvents(memberToken);
     const sockets = [ownerEvents, memberEvents, releasedEvents, noCatalogEvents];
+
     try {
       await Promise.all([
         setEventCapabilities(ownerEvents, RELEASED),
@@ -422,6 +425,7 @@ try {
           CURRENT.filter((capability) => capability !== MCP_SERVERS_CAPABILITY),
         ),
       ]);
+
       const checkAudience = async (phase: string, expected: readonly boolean[]) => {
         const diagnostic = `The provider could not start "${ownerRow.name}".`;
         const sentinel = `End of MCP diagnostic check for ${phase}.`;
@@ -436,6 +440,7 @@ try {
             return received;
           }),
         );
+
         agents.emit("event", { type: "error", code: "mcp_server_not_started", message: diagnostic });
         agents.emit("event", { type: "error", code: "fixture_complete", message: sentinel });
         assert.deepEqual(
@@ -443,11 +448,15 @@ try {
           expected.map((allowed) => (allowed ? [diagnostic] : [])),
         );
       };
+
       await checkAudience("member", [true, true, false, false]);
+
       await runCauseEffect(team.updateMember(memberId, { role: "admin" }));
       await checkAudience("admin", [true, true, true, false]);
+
       await runCauseEffect(team.updateMember(memberId, { role: "member" }));
       await checkAudience("admin role removed", [true, true, false, false]);
+
       await setEventCapabilities(memberEvents, RELEASED);
       await checkAudience("member capability removed", [true, false, false, false]);
       return { owner: true, admin: true, qualifiedMember: true, revokedRole: true, revokedCapability: true };

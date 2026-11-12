@@ -1510,6 +1510,7 @@ function WebWorkspaceFrame(props: WebWorkspaceProps) {
             : undefined,
         }
       : undefined;
+
   const memberUpdateAccess = () => !serverRoleCanAdminister(server());
   const hostUpdateCalls: HostUpdateCalls = {
     getReleaseStatus: async (serverId) =>
@@ -1626,6 +1627,7 @@ function WebWorkspaceFrame(props: WebWorkspaceProps) {
         setHostModelVisibility(hostRequest(serverId), change).pipe(Effect.mapError((error) => error.cause)),
       ),
   };
+
   function hostAgentAccessPolicyCalls(serverId: string): AgentAccessPolicyCalls {
     return {
       serverId,
@@ -1641,6 +1643,7 @@ function WebWorkspaceFrame(props: WebWorkspaceProps) {
         ),
     };
   }
+
   const activeAgentAccessPolicy = createMemo(() => {
     const host = server();
     if (
@@ -1649,11 +1652,13 @@ function WebWorkspaceFrame(props: WebWorkspaceProps) {
       !serverCanAdminister(host, AGENT_ACCESS_POLICY_CAPABILITY)
     )
       return undefined;
+
     return {
       calls: hostAgentAccessPolicyCalls(host.id),
       onViewGroups: (trigger: HTMLElement) => void openServerSettings(host.id, trigger, "agent-groups"),
     };
   });
+
   const hostAgentAccessCalls: HostAgentAccessCalls = {
     getAgentAccess: async (serverId) =>
       runTeamEffect(getHostAgentAccess(hostRequest(serverId)).pipe(Effect.mapError((error) => error.cause))),
@@ -3470,6 +3475,7 @@ function WebWorkspaceFrame(props: WebWorkspaceProps) {
                   createWithPolicy={(agent, { serverId, policyId, expectedRevision }) => {
                     if (server()?.id !== serverId)
                       return Promise.reject(new Error(sourceErrorText("error.agentAccessPolicy.stale")));
+
                     return runTeamEffect(
                       createAgentWithAccessPolicy(hostRequest(serverId), { agent, policyId, expectedRevision }).pipe(
                         Effect.mapError((error) => error.cause),

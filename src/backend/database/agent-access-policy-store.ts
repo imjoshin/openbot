@@ -65,6 +65,7 @@ export class AgentAccessPolicyStore {
       db.prepare("DELETE FROM agent_access_policy_memberships WHERE agent_id = ?").run(agentId);
       return;
     }
+
     db.prepare(
       `INSERT INTO agent_access_policy_memberships (agent_id, policy_id, overrides_json) VALUES (?, ?, ?)
        ON CONFLICT(agent_id) DO UPDATE SET policy_id = excluded.policy_id, overrides_json = excluded.overrides_json`,
@@ -88,6 +89,7 @@ export class AgentAccessPolicyStore {
   /** Called inside the same transaction that first publishes the saved connection. */
   registerConnection(connectionId: string): boolean {
     let registered = false;
+
     for (const policy of this.policies().values()) {
       if (!Object.hasOwn(policy.choices, connectionId)) {
         this.savePolicy({
@@ -142,6 +144,7 @@ export class AgentAccessPolicyStore {
   transaction<A>(run: () => A): A {
     const db = this.database.connection;
     if (db.isTransaction) return run();
+
     db.exec("BEGIN IMMEDIATE");
     try {
       const result = run();

@@ -52,6 +52,7 @@ export function ServerTransferImportScreen() {
   const scope = useQueryScope();
   const canTransfer = useMobileWorkspaceSelector((workspace) => workspace.canTransferServer(serverId));
   const canMap = useMobileWorkspaceSelector((workspace) => workspace.canManageAgentAccessPolicy(serverId));
+
   return (
     <ServerTransferImport
       key={JSON.stringify([scope, serverId, canTransfer, canMap])}
@@ -122,10 +123,12 @@ function ServerTransferImport({
         sourceText("error.import.transferRemoteTooLarge"),
       );
       if (closed.current) return;
+
       if (!upload) {
         setPhase(open ? "review" : "idle");
         return;
       }
+
       const next = await stageInstanceTransfer(upload, serverId, (fraction) => {
         if (!closed.current) setProgress(Math.floor(fraction * 100));
       });
@@ -134,6 +137,7 @@ function ServerTransferImport({
         void discardInstanceTransfer(next.token, serverId).catch(() => undefined);
         return;
       }
+
       token.current = next.token;
       setPreview(next);
       setPhase("review");
@@ -149,8 +153,10 @@ function ServerTransferImport({
 
   async function apply(keys: string[], includeSettings: boolean) {
     if (!preview || locked.current) return;
+
     locked.current = true;
     setError(null);
+
     if (!includeSettings && keys.length > 0 && canMap) {
       setPhase("reading");
       try {
@@ -172,6 +178,7 @@ function ServerTransferImport({
         locked.current = false;
       }
     }
+
     await finish(() => applyInstanceTransfer({ token: preview.token, keys, includeSettings }, serverId));
   }
 
@@ -185,6 +192,7 @@ function ServerTransferImport({
     try {
       const done = await operation();
       if (closed.current) return;
+
       token.current = null;
       setMapping(undefined);
       setPreview(null);
@@ -193,6 +201,7 @@ function ServerTransferImport({
       void haptics.notification("success");
     } catch (caught) {
       if (closed.current) return;
+
       if (
         selection &&
         caught instanceof Error &&
@@ -211,6 +220,7 @@ function ServerTransferImport({
           // If the file is no longer staged, return to file selection below.
         }
       }
+
       // The token is spent once the host starts, so the file must be chosen again.
       token.current = null;
       setPreview(null);

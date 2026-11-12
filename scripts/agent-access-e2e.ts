@@ -840,14 +840,17 @@ try {
     assert.equal(owner.status, 200);
     const snapshot = decodeAgentAccessPolicySnapshot(owner.body);
     assert.equal(snapshot.policies.length, 0);
+
     const member = await agentGroups(routes.list, setup.memberToken, {});
     assert.equal(member.status, 403);
     assert.deepEqual(Object.keys(record(member.body, "member refusal")), ["error"]);
+
     assert.equal(
       (await agentGroups(routes.list, ownerToken, {}, TEAM_PROTOCOL_V8, [AGENT_ACCESS_POLICY_CAPABILITY])).status,
       400,
     );
     assert.equal((await agentGroups(routes.list, ownerToken, {}, TEAM_PROTOCOL_V9, [])).status, 400);
+
     await runCauseEffect(current().team.updateMember(setup.memberId, { role: "admin" }));
     const admin = await agentGroups(routes.list, setup.memberToken, {});
     assert.equal(admin.status, 200);
@@ -877,6 +880,7 @@ try {
     );
     const server = servers.find(({ name }) => name === "Private connection");
     assert.ok(server);
+
     const snapshot = decodeAgentAccessPolicySnapshot((await agentGroups(routes.list, ownerToken, {})).body);
     const mutation: AgentAccessPolicyMutation = {
       kind: "savePolicy",
@@ -887,6 +891,7 @@ try {
       choices: { [server.id]: false },
       assignments: [{ agentId: general, assigned: true, keepOverrides: false }],
     };
+
     const refused = await agentGroups(routes.apply, setup.memberToken, mutation);
     assert.equal(refused.status, 403);
     const badBody = { ...mutation, expectedRevision: -1 };
@@ -903,6 +908,7 @@ try {
       protocol: TEAM_PROTOCOL_V9,
     });
     assert.equal(denied.status, 403);
+
     const preview = await agentGroups(routes.preview, ownerToken, mutation);
     assert.equal(preview.status, 200);
     assert.equal(decodeAgentAccessPolicyPreview(preview.body).revision, snapshot.revision);
@@ -938,6 +944,7 @@ try {
     assert.equal(agent?.name, "General renamed");
     assert.equal(agent?.policyId, policyId);
     assert.equal(agent?.connections.find(({ connectionId }) => connectionId === server.id)?.allowed, false);
+
     const { log } = await readAudit(ownerToken);
     assert.ok(log?.entries.some(({ change }) => change.kind === "agent-access-policy"));
     return { policyId, legacyEdit: edited.status, grant: false, audit: true };
@@ -960,6 +967,7 @@ try {
       canRead: () => Effect.succeed(null),
       refused: () => Effect.void,
     });
+
     await runCauseEffect(proxy.start(null));
     try {
       const url = proxy.url(agentKey);
@@ -971,9 +979,11 @@ try {
           method: "POST",
           headers: { authorization: `Bearer ${token}` },
         });
+
       const disconnected = await callProxy(url, bearer);
       assert.equal(disconnected.status, 503);
       await disconnected.text();
+
       allowed = false;
       const denied = await callProxy(url, bearer);
       assert.equal(denied.status, 401);
@@ -1016,6 +1026,7 @@ try {
         avatarUrl: null,
       }),
     );
+
     const agentId = "fixture-agent";
     const otherAgentId = "fixture-other-agent";
     const allowed = new Set([mcpOAuthProxyAgentKey(agentId), mcpOAuthProxyAgentKey(otherAgentId)]);
@@ -1032,6 +1043,7 @@ try {
       await runCauseEffect(service.load());
       return service;
     };
+
     const binding = async (service: GitHubConnectorService, id: string) => {
       const url = service.mcpServer(id)?.url;
       const bearer = await runCauseEffect(service.mcpAuthorization(id));
@@ -1039,6 +1051,7 @@ try {
       assert.ok(url && bearer && bindingId, "The test connection has no scoped binding.");
       return { url, bearer, bindingId };
     };
+
     const status = async (url: string, bearer: string) => {
       // A valid bearer reaches the method check. GET cannot contact GitHub.
       const response = await fetch(url, { headers: { authorization: `Bearer ${bearer}` } });
@@ -1057,6 +1070,7 @@ try {
       assert.ok(!redactText(`fixture ${first.bearer}`).includes(first.bearer), "The scoped bearer was not redacted.");
       const sealed = await readFile(path, "utf8");
       assert.ok(!sealed.includes(first.bindingId) && !sealed.includes(userToken), "The store exposed sign-in data.");
+
       await runCauseEffect(connector.dispose());
       connector = await start();
       const resumed = await binding(connector, agentId);
@@ -1066,12 +1080,14 @@ try {
       );
       allowed.delete(mcpOAuthProxyAgentKey(agentId));
       assert.equal(await status(first.url, first.bearer), 401);
+
       await runCauseEffect(connector.dispose());
       const oldPort = Number(new URL(first.url).port);
       await new Promise<void>((ready, reject) => {
         listener.once("error", reject);
         listener.listen(oldPort, "127.0.0.1", ready);
       });
+
       connector = await start();
       allowed.add(mcpOAuthProxyAgentKey(agentId));
       const replaced = await binding(connector, agentId);

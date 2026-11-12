@@ -904,6 +904,7 @@ export class OpenBotToolRouter {
    */
   #deferredMcpNote(client: AgentClient, threadId: string): string | null {
     if (client.deferredMcpTools?.(threadId)) return DEFERRED_MCP_NOTE;
+
     const agentId = this.#conversation.agentForThread(threadId);
     if (!agentId) return null;
     const configs = this.#hooks.enabledMcpServers(agentId);
@@ -2000,6 +2001,7 @@ export class OpenBotToolRouter {
           toolStep(() => this.#postMcpSignInCard(senderAgentId, executionThreadId, params.turnId, config)),
         );
       }
+
       this.#postSystemCard(senderAgentId, executionThreadId, params.turnId, {
         itemType: marketplaceSuggestionItemType({ appId: args.app }),
         text: sourceText("status.agent.marketplaceSuggested", { app: args.app }),
@@ -2341,6 +2343,7 @@ export class OpenBotToolRouter {
         .some(({ id, enabled }) => id === config.id && enabled)
     )
       return;
+
     const itemType = mcpSignInItemType({ mcpServerId: config.id });
     const messages = this.#conversation.ensureSnapshot(agentId, threadId).messages;
     if (messages.some((message) => message.turnId === turnId && message.itemType === itemType)) return;

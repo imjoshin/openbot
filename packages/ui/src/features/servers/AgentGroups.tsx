@@ -50,6 +50,7 @@ export function AgentGroupPicker(props: {
     { id: null, name: t("server.agentGroups.noGroup") },
     ...props.policies.map(({ id, name }) => ({ id, name })),
   ]);
+
   return (
     <Select<Option>
       options={options()}
@@ -104,15 +105,18 @@ export function AgentGroupCreationField(props: {
   const { t } = useText();
   const resource = createAgentAccessPolicyResource(() => props.calls);
   const [selectionCleared, setSelectionCleared] = createSignal(false);
+
   createEffect(
     () => {
       const data = resource.state.data;
       const selection = props.value;
       if (!selection || !data) return undefined;
+
       const { serverId, policyId, expectedRevision } = selection;
       if (serverId !== props.calls.serverId || !data.policies.some((policy) => policy.id === policyId)) {
         return { kind: "clear" } as const;
       }
+
       return expectedRevision === data.revision
         ? undefined
         : ({ kind: "replace", selection: { serverId, policyId, expectedRevision: data.revision } } as const);
@@ -126,6 +130,7 @@ export function AgentGroupCreationField(props: {
       }
     },
   );
+
   return (
     <SettingsSection title={t("server.agentGroups.group")}>
       <AgentAccessPolicyStatus resource={resource} />
@@ -188,6 +193,7 @@ export function AgentMcpPermissions(props: AgentMcpPermissionsOptions & { agentI
 function AgentMcpPermissionsForAgent(props: AgentMcpPermissionsOptions & { agentId: string }) {
   const { t, format } = useText();
   const resource = createAgentAccessPolicyResource(() => props.calls);
+
   const data = () => resource.state.data;
   const agent = () => data()?.agents.find((agent) => agent.id === props.agentId);
   const policy = () => data()?.policies.find((policy) => policy.id === agent()?.policyId);
@@ -196,6 +202,7 @@ function AgentMcpPermissionsForAgent(props: AgentMcpPermissionsOptions & { agent
     agent()?.connections.filter(
       (row) => row.override !== null && row.groupValue !== null && row.override !== row.groupValue,
     ).length ?? 0;
+
   type AgentChange = Extract<AgentAccessPolicyMutation, { agentId: string }>;
   function change(
     mutation:
@@ -205,8 +212,10 @@ function AgentMcpPermissionsForAgent(props: AgentMcpPermissionsOptions & { agent
   ) {
     const revision = data()?.revision;
     if (revision === undefined) return;
+
     void resource.preview({ ...mutation, expectedRevision: revision, agentId: props.agentId });
   }
+
   const summary = () => {
     const group = policy();
     const total = t("server.agentGroups.overrides", { count: overrides() });
@@ -214,6 +223,7 @@ function AgentMcpPermissionsForAgent(props: AgentMcpPermissionsOptions & { agent
       ? format.list([total, t("server.agentGroups.differs", { count: differences(), name: group.name })])
       : total;
   };
+
   return (
     <SettingsSection title={t("server.agentGroups.connections")}>
       <AgentAccessPolicyStatus resource={resource} />
@@ -277,6 +287,7 @@ function AgentMcpPermissionsForAgent(props: AgentMcpPermissionsOptions & { agent
                   const connection = () => data()?.connections.find((entry) => entry.id === row.connectionId);
                   const different = () =>
                     row.override !== null && row.groupValue !== null && row.override !== row.groupValue;
+
                   const source = () => {
                     const name = policy()?.name;
                     if (!name)
@@ -288,6 +299,7 @@ function AgentMcpPermissionsForAgent(props: AgentMcpPermissionsOptions & { agent
                       });
                     return t("server.agentGroups.matches", { name });
                   };
+
                   return (
                     <Show when={connection()}>
                       {(entry) => (
@@ -345,6 +357,7 @@ function AgentMcpPermissionsForAgent(props: AgentMcpPermissionsOptions & { agent
         {(review) => {
           const mutation = review.mutation;
           if (mutation.kind !== "assignAgent") return undefined;
+
           if (mutation.policyId === null) {
             return (
               <Text variant="caption" tone="muted">
@@ -352,6 +365,7 @@ function AgentMcpPermissionsForAgent(props: AgentMcpPermissionsOptions & { agent
               </Text>
             );
           }
+
           return (
             <Show when={overrides() > 0}>
               <Item class="settings-modal-row">
@@ -391,12 +405,14 @@ export function AgentGroupsPanel(props: {
   const { t } = useText();
   const resource = createAgentAccessPolicyResource(() => props.calls);
   const [page, setPage] = createSignal<string | null | undefined>();
+
   // Seed the draft once per group and revision. A read of the same revision keeps unsaved edits.
   const editor = createMemo(
     () => {
       const data = resource.state.data;
       const policyId = page();
       if (!data || policyId === undefined) return undefined;
+
       const policy = data.policies.find((policy) => policy.id === policyId);
       return {
         policyId,
@@ -406,6 +422,7 @@ export function AgentGroupsPanel(props: {
     },
     { equals: (before, after) => before?.policyId === after?.policyId && before?.revision === after?.revision },
   );
+
   const list = () => {
     setPage(undefined);
     props.onDetail(null);
@@ -414,6 +431,7 @@ export function AgentGroupsPanel(props: {
     setPage(id);
     props.onDetail({ title, back: list });
   };
+
   return (
     <>
       <AgentAccessPolicyStatus resource={resource} />
@@ -521,6 +539,7 @@ function AgentGroupEditor(props: {
     choices: {},
     assignments: {},
   });
+
   const choice = (connectionId: string) => {
     const group = policy();
     return draft.choices[connectionId] ?? group?.choices[connectionId] ?? group?.allowNewConnections ?? false;
@@ -528,8 +547,10 @@ function AgentGroupEditor(props: {
   const [deleting, setDeleting] = createSignal(false);
   const [destination, setDestination] = createSignal<string | null>();
   const agents = () => props.data.agents.filter((agent) => agent.policyId === props.policyId);
+
   function save() {
     const choices = Object.fromEntries(props.data.connections.map(({ id }) => [id, choice(id)]));
+
     void props.resource.preview({
       kind: "savePolicy",
       expectedRevision: props.data.revision,
@@ -540,6 +561,7 @@ function AgentGroupEditor(props: {
       assignments: Object.values(draft.assignments),
     });
   }
+
   return (
     <Show
       when={props.policyId === null || policy()}
@@ -613,6 +635,7 @@ function AgentGroupEditor(props: {
               const from = () =>
                 props.data.policies.find((policy) => policy.id === agent.policyId)?.name ??
                 t("server.agentGroups.noGroup");
+
               return (
                 <Item class="settings-modal-row">
                   <ItemContent>
@@ -640,6 +663,7 @@ function AgentGroupEditor(props: {
                     disabled={props.resource.state.busy}
                     onChange={(next) => {
                       const savedAssignment = assigned();
+
                       setDraft((draft) => {
                         if (next === savedAssignment) delete draft.assignments[agent.id];
                         else draft.assignments[agent.id] = { agentId: agent.id, assigned: next, keepOverrides: false };
@@ -697,6 +721,7 @@ function AgentGroupEditor(props: {
                 disabled={agents().length > 0 && destination() === undefined}
                 onClick={() => {
                   setDeleting(false);
+
                   void props.resource.preview({
                     kind: "deletePolicy",
                     expectedRevision: props.data.revision,

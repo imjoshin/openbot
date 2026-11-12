@@ -25,6 +25,7 @@ export function AgentGroupPickerRow({
   const { t } = useText();
   const { theme } = useUniwind();
   const title = label ?? t("mobile.server.agentGroups.group");
+
   return (
     <SettingsRow
       disclosure={false}
@@ -71,6 +72,7 @@ export function AgentPolicyToggle({
 }) {
   const { theme } = useUniwind();
   const warningColor = String(useCSSVariable("--openbot-warning-text"));
+
   return (
     <View>
       <SettingsRow disclosure={false}>
@@ -102,6 +104,7 @@ export function AgentPolicyToggle({
 export function AgentPolicyStatus({ policy }: { policy: AgentAccessPolicyView }) {
   const { t } = useText();
   if (!policy.available) return <SettingsNote>{t("mobile.server.agentGroups.unsupported")}</SettingsNote>;
+
   return (
     <>
       {policy.error ? (
@@ -139,18 +142,22 @@ export function AgentPolicyReview({
   const { t, format } = useText();
   const connectionText = useAgentPolicyConnectionText();
   if (!policy.review || !policy.data) return null;
+
   const { mutation, preview } = policy.review;
   const { connections, agents } = policy.data;
+
   function names(ids: readonly string[]) {
     return format.list(
       ids.map((id) => {
         const connection = connections.find((item) => item.id === id);
         if (!connection) return id;
+
         const { name } = connectionText(connection);
         return connection.available ? name : t("mobile.server.agentGroups.unavailableLabel", { name });
       }),
     );
   }
+
   return (
     <>
       <SettingsSection
@@ -174,6 +181,7 @@ export function AgentPolicyReview({
                 ? [t("mobile.server.agentGroups.disabled", { names: names(change.disabledConnectionIds) })]
                 : []),
             ];
+
             return (
               <SettingsRow
                 key={change.agentId}

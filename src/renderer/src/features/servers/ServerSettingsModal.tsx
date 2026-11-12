@@ -384,10 +384,12 @@ export function ServerSettingsModal(props: ServerSettingsModalProps) {
   const [section, setSection] = createSignal<Section>("general");
   const [permissionsPage, setPermissionsPage] = createSignal<PermissionsPage | null>(null);
   const [groupCrumb, setGroupCrumb] = createSignal<SettingsCrumb | null>(null);
+
   const backToPermissions = () => {
     setPermissionsPage(null);
     setGroupCrumb(null);
   };
+
   /** Set while the MCP panel shows a form, so the header reads `MCP › Connect to a custom MCP`. */
   const [mcpDetail, setMcpDetail] = createSignal<McpPanelDetail | null>(null);
   /** Set while a provider page is open, so the header reads `Providers › Codex`. */
@@ -405,6 +407,7 @@ export function ServerSettingsModal(props: ServerSettingsModalProps) {
         return groupCrumb() ?? { title: t("server.agentGroups.title"), back: backToPermissions };
       }
     }
+
     return section() === "providers" ? providerDetail() : null;
   };
   /** The key of the one action in flight, gating every panel at once rather than belonging to any. */
@@ -474,8 +477,10 @@ export function ServerSettingsModal(props: ServerSettingsModalProps) {
     if (requested === "permissions" && !roles.available() && !props.agentAccessPolicy) return null;
     if (requested === "roles" && !roles.available()) return null;
     if (requested === "agent-groups" && !props.agentAccessPolicy) return null;
+
     return requested ?? null;
   };
+
   function openSection(requested: ServerSettingsSection) {
     backToPermissions();
     if (requested === "roles" || requested === "agent-groups") {
@@ -485,6 +490,7 @@ export function ServerSettingsModal(props: ServerSettingsModalProps) {
       setSection(requested);
     }
   }
+
   const published = () => (local() ? props.hostStatus?.phase === "online" : props.server.state === "online");
 
   async function run(key: string, action: () => Promise<void>): Promise<boolean> {
@@ -689,6 +695,7 @@ export function ServerSettingsModal(props: ServerSettingsModalProps) {
     }),
     ({ available, pageAvailable, selected }) => {
       if (!selected) return;
+
       if (!available) openSection("members");
       else if (!pageAvailable) backToPermissions();
     },

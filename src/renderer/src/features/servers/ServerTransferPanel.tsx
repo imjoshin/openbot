@@ -24,6 +24,7 @@ export function ServerTransferPanel(props: ServerTransferOptions & { serverId: s
     props.calls ?? window.openbot.instanceTransfer,
     () => props.policyMapping,
   );
+
   return (
     <InstanceTransferView
       screen={store.state.screen}

@@ -2044,6 +2044,7 @@ export function MobileWorkspaceProvider({ children }: PropsWithChildren) {
               }
             : {}),
         };
+
         const created = input.accessPolicy
           ? remoteAgentOf(
               await runTeamRequest(
@@ -2055,6 +2056,7 @@ export function MobileWorkspaceProvider({ children }: PropsWithChildren) {
               ),
             )
           : await request("POST", TEAM_API_ROUTES.agents.all, decodeAgent, agent, serverId);
+
         setAgents((current) => [
           ...current.filter((agent) => agent.id !== created.id),
           projectAgent(serverId, created, null),

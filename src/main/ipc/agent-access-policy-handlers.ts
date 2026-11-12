@@ -62,6 +62,7 @@ export function agentAccessPolicyIpcHandlers({
   const localOwner: AgentAccessPolicyActor = { role: "owner", userId: "local-owner" };
   const policy = service.agentAccessPolicy;
   const routes = AGENT_ACCESS_POLICY_ROUTES;
+
   function remote<T>(
     serverId: string,
     route: string,
@@ -77,6 +78,7 @@ export function agentAccessPolicyIpcHandlers({
     if (!remoteServers.supportsCapability(serverId, AGENT_ACCESS_POLICY_CAPABILITY)) {
       throw new Error(sourceText("error.team.agentAccessPolicyUnsupported"));
     }
+
     return runCauseEffect(
       remoteServers.request(serverId, route, decode, {
         method: "POST",
@@ -106,6 +108,7 @@ export function agentAccessPolicyIpcHandlers({
         local: (input) => Effect.runPromise(policy.apply(input, localOwner).pipe(Effect.tap(recordChange))),
         remote: (input, serverId) => remote(serverId, routes.apply, decodeAgentAccessPolicyApplyResultFromHost, input),
       }),
+
       createAgent: scopedHandler(parseCreateAgentWithAccessPolicy, {
         local: ({ agent, policyId, expectedRevision }) =>
           runCauseEffect(
@@ -120,6 +123,7 @@ export function agentAccessPolicyIpcHandlers({
         remote: (input, serverId) =>
           remote(serverId, routes.createAgent, decodeAgentCreatedWithAccessPolicyFromHost, input),
       }),
+
       getTransferMapping: scopedHandler(parseAgentAccessPolicyTransferSelection, {
         local: (input) => runCauseEffect(instanceTransfer.getTransferMapping(input)),
         remote: (input, serverId) =>
@@ -143,6 +147,7 @@ export function agentAccessPolicyIpcHandlers({
             },
             AGENT_IMPORT_UPLOAD_TIMEOUT_MS,
           );
+
           const agents = await runCauseEffect(
             remoteServers.request(serverId, TEAM_API_ROUTES.agents.all, decodeAgentSummaries),
           );

@@ -1517,6 +1517,7 @@ export const messages = {
     "Estos proveedores tenían la sesión iniciada en el otro servidor, pero aquí no. Inicia sesión en ellos en Ajustes del servidor › Proveedores.",
   "mobile.server.transfer.notImported": "No importados",
   "mobile.server.transfer.warnings": "Revisa esto",
+
   "mobile.server.agentGroups.permissions": "Permisos",
   "mobile.server.agentGroups.title": "Grupos de agentes",
   "mobile.server.agentGroups.description": "Define el acceso MCP predeterminado de los grupos de agentes.",
@@ -1578,6 +1579,7 @@ export const messages = {
   "mobile.server.agentGroups.unsupported": "Los grupos de agentes no están disponibles en este servidor.",
   "mobile.server.agentGroups.clear": "Quitar excepciones",
   "mobile.server.agentGroups.selectAgain": "Borrar la selección y volver a elegir un grupo",
+
   "mobile.server.transferMapping.description":
     "Elige un grupo de destino para cada agente y un destino para cada conexión. Se conserva el acceso actual. Las demás conexiones de este servidor siguen bloqueadas.",
   "mobile.server.transferMapping.agents": "Grupos de destino",

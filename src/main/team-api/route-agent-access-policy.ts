@@ -74,6 +74,7 @@ function requireVisibleTargets(
         ? mutation.assignments.map(({ agentId }) => agentId)
         : [];
   if (targets.length === 0) return;
+
   const agentIds = new Set(listAgents().map(({ id }) => id));
   if (targets.some((id) => hiddenAgentIds.has(id) || !agentIds.has(id))) {
     throw new HttpError(404, sourceText("error.team.agentNotFound"));
@@ -103,14 +104,18 @@ export async function routeAgentAccessPolicy(
   const { list, preview, apply } = AGENT_ACCESS_POLICY_ROUTES;
   const path = url.pathname;
   if (method !== "POST" || (path !== list && path !== preview && path !== apply)) return "unmatched";
+
   requireAgentAccessPolicy(context, service);
   const actor = { userId: member.id, role: member.role };
+
   if (path === list) {
     await readAgentAccessPolicyInput(context, (body) => body);
     return json(200, visibleSnapshot(await runPolicy(service.read(actor), hiddenAgentIds), hiddenAgentIds));
   }
+
   const mutation = await readAgentAccessPolicyInput(context, parseAgentAccessPolicyMutation);
   requireVisibleTargets(mutation, hiddenAgentIds, listAgents);
+
   if (path === preview) {
     const result = await runPolicy(service.preview(mutation, actor), hiddenAgentIds);
     const changes = result.changes.filter(({ agentId }) => !hiddenAgentIds.has(agentId));
@@ -121,6 +126,7 @@ export async function routeAgentAccessPolicy(
       overridesRetained: changes.reduce((sum, change) => sum + change.overridesRetained, 0),
     });
   }
+
   if (path === apply) {
     const result = await runPolicy(service.apply(mutation, actor), hiddenAgentIds);
     await recordPolicyChange(context, audit, serverId);
@@ -130,5 +136,6 @@ export async function routeAgentAccessPolicy(
       agentIds: result.agentIds.filter((id) => !hiddenAgentIds.has(id)),
     });
   }
+
   return "unmatched";
 }

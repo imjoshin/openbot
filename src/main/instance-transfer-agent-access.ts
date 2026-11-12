@@ -33,6 +33,7 @@ export type TransferAgentAccessData = typeof TransferAgentAccess.Type;
 export function validTransferAgentAccess(data: TransferAgentAccessData, keys: ReadonlySet<string>): boolean {
   const policyIds = new Set(data.policies.map(({ id }) => id));
   const memberKeys = new Set(data.memberships.map(({ key }) => key));
+
   return (
     policyIds.size === data.policies.length &&
     memberKeys.size === data.memberships.length &&
@@ -54,6 +55,7 @@ export function buildAgentAccessTransferMapping(
   input: AgentAccessPolicyTransferMapping,
 ) {
   if (destination.revision !== input.expectedRevision) throw new Error(sourceText("error.agentAccessPolicy.stale"));
+
   const groupById = new Map(destination.policies.map((policy) => [policy.id, policy]));
   const sourceGroupById = new Map(data.policies.map((policy) => [policy.id, policy]));
   const members = new Map(data.memberships.map((member) => [member.key, member]));
@@ -61,6 +63,7 @@ export function buildAgentAccessTransferMapping(
   const connections = new Map(input.connectionMappings.map(({ sourceId, destinationId }) => [destinationId, sourceId]));
   const sourceIds = new Set(input.connectionMappings.map(({ sourceId }) => sourceId));
   const connectionIds = destination.connections.map(({ id }) => id);
+
   if (
     assignments.size !== input.agentMappings.length ||
     assignments.size !== input.keys.length ||
@@ -75,16 +78,20 @@ export function buildAgentAccessTransferMapping(
 
   const memberships = new Map<string, { membership: AgentAccessPolicyMembership; policyRevision: number | null }>();
   const agents: AgentAccessPolicyTransferPreview["agents"][number][] = [];
+
   for (const key of input.keys) {
     const policyId = assignments.get(key);
     const source = members.get(key);
     if (policyId === undefined || !source) throw policyMappingRequired();
+
     const group = policyId === null ? null : groupById.get(policyId);
     const sourceGroup = source.policyId === null ? null : sourceGroupById.get(source.policyId);
     if (group === undefined || sourceGroup === undefined) throw policyMappingRequired();
+
     const overrides = new Map<string, boolean>();
     const enabledConnectionIds: string[] = [];
     const disabledConnectionIds: string[] = [];
+
     for (const id of connectionIds) {
       const sourceId = connections.get(id);
       const explicit =
@@ -95,6 +102,7 @@ export function buildAgentAccessTransferMapping(
       if (sourceId === undefined || explicit !== undefined || allowed !== inherited) overrides.set(id, allowed);
       (allowed ? enabledConnectionIds : disabledConnectionIds).push(id);
     }
+
     const membership = { policyId, overrides: Object.fromEntries(overrides) };
     memberships.set(key, { membership, policyRevision: group?.revision ?? null });
     agents.push({
@@ -105,6 +113,7 @@ export function buildAgentAccessTransferMapping(
       disabledConnectionIds,
     });
   }
+
   const preview: AgentAccessPolicyTransferPreview = { revision: destination.revision, agents };
   return { preview, memberships, connectionIds };
 }

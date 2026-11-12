@@ -297,6 +297,7 @@ export function decodeTransferManifest(bytes: Uint8Array): { manifest: TransferM
     ) {
       throw new Error(sourceText("error.import.transferNotFile"));
     }
+
     const agent = decodeAgent(item);
     if (Result.isFailure(agent) || keys.has(agent.success.key) || !hasSafePaths(agent.success)) {
       warnings.push(sourceText("error.import.transferAgentInvalid", { number: index + 1 }));
@@ -312,6 +313,7 @@ export function decodeTransferManifest(bytes: Uint8Array): { manifest: TransferM
     else warnings.push(sourceText("error.import.transferSettingsInvalid"));
   }
   if (agents.length === 0 && settings === null) throw new Error(sourceText("error.import.transferEmpty"));
+
   if (file.accessPolicy) {
     const connectionIds = new Set(settings?.mcpServers.map(({ id }) => id));
     if (
@@ -327,6 +329,7 @@ export function decodeTransferManifest(bytes: Uint8Array): { manifest: TransferM
       throw new Error(sourceText("error.import.transferNotFile"));
     }
   }
+
   return {
     manifest: {
       appVersion: file.source.appVersion || "unknown",

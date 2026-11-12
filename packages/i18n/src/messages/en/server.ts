@@ -785,6 +785,7 @@ export const messages = defineMessages("server", {
   "server.settings.responseStyleNatural": "Natural",
   "server.settings.responseStyleClassic": "Classic",
   "server.settings.personalityLoadFailed": "Could not load the server personality.",
+
   "server.agentGroups.permissions": "Permissions",
   "server.agentGroups.permissionsDescription": "Manage roles and MCP access for agents.",
   "server.agentGroups.title": "Agent Groups",
@@ -843,5 +844,6 @@ export const messages = defineMessages("server", {
   "server.agentGroups.reload": "Refresh groups",
   "server.agentGroups.selectionCleared":
     "The selected group is unavailable. Choose a group before you create the agent.",
+
   "server.audit.agentAccessPolicy": "Changed Agent Groups permissions.",
 });

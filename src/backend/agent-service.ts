@@ -665,6 +665,7 @@ export class AgentService extends EventEmitter<AgentServiceEvents> {
       connections: () => this.#mcp.policyConnections(),
       busy: (agentId) => {
         const agent = store.list().find(({ id }) => id === agentId);
+
         return (
           agent !== undefined &&
           (this.#threads.providerContextBusy(agent) ||
@@ -4331,14 +4332,17 @@ export class AgentService extends EventEmitter<AgentServiceEvents> {
       );
     yield* lifecycleStep("restore channel links", () => {
       this.#mcp.migrateCatalogRows();
+
       this.#store.agentAccessPolicies.transaction(() => {
         const policies = this.#store.agentAccessPolicies;
         let registered = false;
+
         for (const { id } of this.#mcp.policyConnections()) {
           if (policies.registerConnection(id)) registered = true;
         }
         if (registered) policies.advanceRevision();
       });
+
       this.channels.restoreDeliveryLinks();
       this.channels.removeDeletedMembers(new Set(this.#store.list().map((agent) => agent.id)));
     });

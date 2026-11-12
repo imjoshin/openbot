@@ -191,6 +191,7 @@ export class McpServerStore {
     // that runs is the row the user saw and the next read does not turn it off again. Turned off, the
     // row already reads as off, and its stored values stay.
     if (enabled && stored.unreadable.length > 0) return this.save({ ...current, enabled }, now);
+
     const db = this.database.connection;
     db.exec("BEGIN IMMEDIATE");
     try {

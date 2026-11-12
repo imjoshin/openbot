@@ -182,11 +182,13 @@ export function createServerTransferStore(
   async function importFile(keys: string[], includeSettings: boolean): Promise<void> {
     const token = state.preview?.token;
     if (!token || state.importPhase === "importing") return;
+
     const generation = ++importGeneration;
     setState((draft) => {
       draft.importPhase = "importing";
       draft.importError = null;
     });
+
     const mappingApi = mappingCalls();
     if (!includeSettings && mappingApi && keys.length > 0) {
       const selection = { token, keys };
@@ -206,6 +208,7 @@ export function createServerTransferStore(
         return;
       }
     }
+
     await applyImport(() => calls.apply({ token, keys, includeSettings }, serverId), generation);
   }
 
@@ -225,9 +228,11 @@ export function createServerTransferStore(
     setState((draft) => {
       if (draft.mapping) delete draft.mapping.review;
     });
+
     try {
       const options = await api.getTransferMapping(selection, serverId);
       if (generation !== importGeneration) return;
+
       setState((draft) => {
         draft.mapping = options ? { selection, options } : null;
       });
@@ -246,22 +251,26 @@ export function createServerTransferStore(
     const api = mappingCalls();
     const mapping = state.mapping;
     if (!api || !mapping || state.importPhase === "importing") return;
+
     const selection = snapshot(mapping.selection);
     const generation = ++importGeneration;
     setState((draft) => {
       draft.importPhase = "importing";
       draft.importError = null;
     });
+
     try {
       const mutation = snapshot(input);
       const preview = await api.previewTransferMapping(mutation, serverId);
       if (generation !== importGeneration) return;
+
       setState((draft) => {
         if (draft.mapping) draft.mapping.review = { input: mutation, preview };
         draft.importPhase = "review";
       });
     } catch (error) {
       if (generation !== importGeneration) return;
+
       if (stale(error)) await refreshMapping(api, selection, generation, error);
       else showMappingError(error);
     }
@@ -271,6 +280,7 @@ export function createServerTransferStore(
     const api = mappingCalls();
     const mapping = state.mapping;
     if (!api || !mapping?.review || state.importPhase === "importing") return;
+
     const selection = snapshot(mapping.selection);
     const input = snapshot(mapping.review.input);
     const generation = ++importGeneration;
@@ -278,6 +288,7 @@ export function createServerTransferStore(
       draft.importPhase = "importing";
       draft.importError = null;
     });
+
     await applyImport(
       () => api.applyTransferMapping(input, serverId),
       generation,
@@ -293,6 +304,7 @@ export function createServerTransferStore(
     try {
       const result = await run();
       if (generation !== importGeneration) return;
+
       desktopAnalytics.track("server_transfer_action", { action: "import", result: "succeeded" });
       setState((draft) => {
         draft.importPhase = "done";
@@ -306,6 +318,7 @@ export function createServerTransferStore(
         await onStale(error);
         return;
       }
+
       desktopAnalytics.track("server_transfer_action", {
         action: "import",
         result: "failed",

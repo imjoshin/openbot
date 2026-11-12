@@ -19,6 +19,7 @@ function resolve(
 ) {
   const policy = policies.find((item) => item.id === agent.policyId);
   if (agent.policyId !== null && !policy) throw new Error(sourceText("error.agentAccessPolicy.invalid"));
+
   return connections.map((connection) => {
     const groupValue = policy ? (policy.choices[connection.id] ?? false) : null;
     const override = agent.overrides[connection.id] ?? null;
@@ -53,12 +54,14 @@ export function createMockAgentAccessPolicy(
   function observeConnections() {
     const connections = listConnections();
     const signature = JSON.stringify(connections.map(({ id, available }) => [id, available]).sort());
+
     if (signature !== connectionSignature) {
       connectionSignature = signature;
       revision += 1;
       policies = policies.map((policy) => {
         const registered = connections.filter(({ id }) => !Object.hasOwn(policy.choices, id));
         if (registered.length === 0) return policy;
+
         return {
           ...policy,
           revision: policy.revision + 1,
@@ -69,6 +72,7 @@ export function createMockAgentAccessPolicy(
         };
       });
     }
+
     return connections;
   }
 
@@ -92,6 +96,7 @@ export function createMockAgentAccessPolicy(
   function change(input: AgentAccessPolicyMutation) {
     const connections = observeConnections();
     checkRevision(input.expectedRevision);
+
     const before = snapshot(policies, assignments, revision, connections);
     const nextAssignments = new Map(assignments);
     let nextPolicies = [...policies];
@@ -99,6 +104,7 @@ export function createMockAgentAccessPolicy(
     function assign(agentId: string, policyId: string | null, keep: boolean) {
       const agent = before.agents.find((item) => item.id === agentId);
       if (!agent) throw new Error(sourceText("error.agentAccessPolicy.invalid"));
+
       const overrides =
         policyId === null
           ? Object.fromEntries(agent.connections.filter((row) => !row.allowed).map((row) => [row.connectionId, false]))
@@ -107,11 +113,13 @@ export function createMockAgentAccessPolicy(
             : {};
       nextAssignments.set(agentId, { policyId, overrides });
     }
+
     switch (input.kind) {
       case "savePolicy": {
         const id = input.policyId ?? crypto.randomUUID();
         const saved = policies.find((policy) => policy.id === id);
         if (input.policyId !== null && !saved) throw new Error(sourceText("error.agentAccessPolicy.invalid"));
+
         const policy = {
           id,
           name: input.name,
@@ -123,6 +131,7 @@ export function createMockAgentAccessPolicy(
             ...input.choices,
           },
         };
+
         nextPolicies = saved ? nextPolicies.map((item) => (item.id === id ? policy : item)) : [...nextPolicies, policy];
         for (const assignment of input.assignments)
           assign(assignment.agentId, assignment.assigned ? id : null, assignment.keepOverrides);
@@ -135,6 +144,7 @@ export function createMockAgentAccessPolicy(
           (input.destinationPolicyId !== null && !policies.some((policy) => policy.id === input.destinationPolicyId))
         )
           throw new Error(sourceText("error.agentAccessPolicy.invalid"));
+
         nextPolicies = nextPolicies.filter((policy) => policy.id !== input.policyId);
         for (const agent of before.agents) {
           if (agent.policyId === input.policyId) assign(agent.id, input.destinationPolicyId, false);
@@ -147,11 +157,13 @@ export function createMockAgentAccessPolicy(
       case "resetOverrides": {
         const agent = before.agents.find((agent) => agent.id === input.agentId);
         if (!agent) throw new Error(sourceText("error.agentAccessPolicy.invalid"));
+
         const overrides = input.kind === "resetOverrides" ? {} : { ...agent.overrides };
         if (input.kind === "setOverride") {
           if (input.allowed === null) delete overrides[input.connectionId];
           else overrides[input.connectionId] = input.allowed;
         }
+
         nextAssignments.set(agent.id, { policyId: agent.policyId, overrides });
         break;
       }
@@ -166,6 +178,7 @@ export function createMockAgentAccessPolicy(
     const changes = after.agents.flatMap((agent, index) => {
       const previous = before.agents[index];
       if (!previous) return [];
+
       const changed = agent.connections.filter(
         (row) => previous.connections.find((item) => item.connectionId === row.connectionId)?.allowed !== row.allowed,
       );
@@ -175,6 +188,7 @@ export function createMockAgentAccessPolicy(
         (input.kind === "savePolicy" || input.kind === "deletePolicy") &&
         input.policyId !== null &&
         input.policyId === previous.policyId;
+
       if (
         !affectedGroup &&
         !changed.length &&
@@ -183,6 +197,7 @@ export function createMockAgentAccessPolicy(
         !("agentId" in input && input.agentId === agent.id)
       )
         return [];
+
       return [
         {
           agentId: agent.id,
@@ -193,6 +208,7 @@ export function createMockAgentAccessPolicy(
         },
       ];
     });
+
     return {
       revision,
       changes,
@@ -221,12 +237,14 @@ export function createMockAgentAccessPolicy(
       if (policyId !== null && !policies.some((policy) => policy.id === policyId)) {
         throw new Error(sourceText("error.agentAccessPolicy.invalid"));
       }
+
       assignments.set(agentId, { policyId, overrides: {} });
       revision += 1;
     },
     copyAgentAccess(sourceId, agentId) {
       const source = assignments.get(sourceId);
       if (!source) return;
+
       assignments.set(agentId, { policyId: source.policyId, overrides: { ...source.overrides } });
       revision += 1;
     },

@@ -65,6 +65,7 @@ await writeFile(
 );
 process.env.OPENBOT_CODEX_PATH = launcher;
 process.env.CODEX_HOME = join(home, ".codex");
+
 const { AgentService } = await import("../src/backend/agent-service");
 const { AgentStore } = await import("../src/backend/agent-store");
 const { runCauseEffect } = await import("../src/backend/effect-boundary");
@@ -81,11 +82,13 @@ const http = createServer((request, response) => {
     response.writeHead(405).end();
     return;
   }
+
   let body = "";
   request.setEncoding("utf8");
   request.on("data", (chunk: string) => {
     body += chunk;
   });
+
   request.on("end", () => {
     const { id, method }: { id?: number; method: string } = JSON.parse(body);
     requests.push(method);
@@ -97,10 +100,12 @@ const http = createServer((request, response) => {
           ? "personal"
           : "none",
     );
+
     if (id === undefined) {
       response.writeHead(202).end();
       return;
     }
+
     const results: DynamicRecord = {
       initialize: {
         protocolVersion: "2025-06-18",
@@ -114,15 +119,18 @@ const http = createServer((request, response) => {
       "prompts/list": { prompts: [{ name: "fixture" }] },
       "prompts/get": { messages: [{ role: "user", content: { type: "text", text: "Fixture prompt" } }] },
     };
+
     response.writeHead(200, { "content-type": "application/json" });
     const result = results[method];
     response.end(JSON.stringify({ jsonrpc: "2.0", id, ...(result ? { result } : { error: { code: -32601 } }) }));
   });
 });
+
 await new Promise<void>((done) => http.listen(0, "127.0.0.1", done));
 const address = http.address();
 assert.ok(address && typeof address === "object");
 const url = `http://127.0.0.1:${address.port}/mcp`;
+
 const records = new Map<string, McpOAuthRecord>();
 let proxySettings: McpOAuthProxySettings | null = null;
 const oauth = new McpOAuth({
@@ -182,6 +190,7 @@ async function start() {
       },
     },
   });
+
   started = true;
   await runCauseEffect(sidebar.initialize());
   await runCauseEffect(agents.initialize());
@@ -266,9 +275,11 @@ const override = (agentId: string, connectionId: string, allowed: boolean | null
 async function connection(name: string, id = "", account?: string) {
   const resource = account ? `${url}#account-${account}` : url;
   const key = mcpOAuthAccountKey(resource);
+
   if (account && key && !records.has(key)) {
     records.set(key, { tokens: { access_token: `fixture-${account}`, token_type: "Bearer" } });
   }
+
   const config: McpServerConfig = {
     id,
     name,
@@ -419,6 +430,7 @@ const report: { passed: boolean; cases: { name: string; passed: boolean; details
   passed: false,
   cases: [],
 };
+
 async function step(name: string, run: () => Promise<object>) {
   const item: (typeof report.cases)[number] = { name, passed: false };
   report.cases.push(item);
@@ -432,6 +444,7 @@ try {
   const personal = await connection("personal_mail", "", "personal");
   marketplaceConnectionId = personal;
   assert.notEqual(work, personal);
+
   const workGroup = (await save(group("Work", { [work]: true }))).policies[0];
   assert.ok(workGroup);
   const personalGroup = (await save(group("Personal", { [personal]: true }))).policies.find(
@@ -440,6 +453,7 @@ try {
   assert.ok(personalGroup);
   assert.equal(workGroup.choices[personal], false);
   assert.equal(personalGroup.choices[work], false);
+
   const workAgent = await createAgent("Work agent", workGroup.id, true);
   const personalAgent = await createAgent("Personal agent", personalGroup.id, false);
   const workspaceFile = join(personalAgent.workspacePath, "fixture-keep.txt");
@@ -469,10 +483,12 @@ try {
     await save(group("Work renamed", {}, workGroup.id, true));
     assert.equal(privateSession(workAgent), initialWorkSession);
     assert.equal(privateSession(personalAgent), initialPersonalSession);
+
     const history = database.readConversation(workAgent.id, workAgent.threadId).messages;
     await stop();
     await start();
     assert.deepEqual(database.readConversation(workAgent.id, workAgent.threadId).messages, history);
+
     const before = providerLog().length;
     await done(await send(workAgent.id, "After restart"));
     assert.equal(privateSession(workAgent), initialWorkSession);
@@ -491,6 +507,7 @@ try {
     const personalRoute = handoff(personalAgent).personal_mail;
     assert.ok(workRoute?.url && personalRoute?.url);
     assert.notEqual(workRoute.url, personalRoute.url);
+
     const methods = {
       initialize: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "fixture", version: "1" } },
       "tools/list": {},
@@ -511,6 +528,7 @@ try {
     assert.equal((await mcpCall(personalRoute, "tools/list")).status, 200);
     assert.equal(requestAccounts.at(-1), "personal");
     assert.equal((await mcpCall(personalRoute, "tools/list", {}, workRoute.http_headers)).status, 403);
+
     await save(override(workAgent.id, work, false));
     const afterRevoke = requests.length;
     for (const [method, params] of Object.entries(methods)) {
@@ -519,6 +537,7 @@ try {
       assert.match(response.body, /"code":-32001/u);
     }
     assert.equal(requests.length, afterRevoke);
+
     const deniedSearch = await tool(workAgent.id, "tool_search", { query: "work mail" });
     assert.equal(deniedSearch.success, true);
     assert.doesNotMatch(deniedSearch.contentItems?.[0]?.text ?? "", /"mcpTools"/u);
@@ -544,10 +563,12 @@ try {
     assert.notEqual(privateSession(workAgent), initialWorkSession);
     assert.ok(handedServers(workAgent).includes("personal_mail"));
     assert.ok(!handedServers(workAgent).includes("work_mail"));
+
     const matching = await save(group("Work renamed", { [personal]: true }, workGroup.id));
     assert.equal(choice(matching, workAgent.id, personal).source, "override");
     assert.equal(choice(matching, workAgent.id, personal).groupValue, true);
     await save(group("Work renamed", { [personal]: false }, workGroup.id));
+
     const sync = await revision({ kind: "resetOverrides", agentId: workAgent.id });
     const planned = await preview(sync);
     assert.deepEqual(planned.changes, [
@@ -571,6 +592,7 @@ try {
     const beforeWork = privateSession(workAgent);
     const beforePersonal = privateSession(personalAgent);
     assert.ok(beforeWork && beforePersonal);
+
     await save(group("Work renamed", { [id]: true }, workGroup.id));
     await done(await send(workAgent.id, "After granting Work docs"));
     assert.notEqual(privateSession(workAgent), beforeWork);
@@ -587,6 +609,7 @@ try {
     assert.equal(listing.success, true);
     assert.match(JSON.stringify(listing), /work_mail/u);
     assert.doesNotMatch(JSON.stringify(listing), /personal_mail/u);
+
     const before = requests.length;
     const denied = await tool(workAgent.id, "test_mcp_server", { name: "personal_mail" });
     assert.equal(denied.success, false);
@@ -602,6 +625,7 @@ try {
     const allowed = await tool(workAgent.id, "test_mcp_server", { name: "work_mail" });
     assert.equal(allowed.success, true);
     assert.ok(requests.slice(before).includes("tools/list"));
+
     const routine = agents.createRoutine({
       agentId: workAgent.id,
       name: "Policy routine",
@@ -638,6 +662,7 @@ try {
     await runCauseEffect(agents.commitAgentDuplication(duplicate.id, sidebar.getSnapshot()));
     assert.equal(member(await read(), duplicate.id).policyId, workGroup.id);
     assert.deepEqual(member(await read(), duplicate.id).overrides, { [personal]: false });
+
     const childResult = await tool(workAgent.id, "create_agent", {
       name: "Policy child",
       description: "Fixture child",
@@ -661,9 +686,11 @@ try {
     await preview(staleOverride);
     assert.deepEqual(member((await apply(keep)).snapshot, workAgent.id).overrides, { [personal]: false });
     await refused(staleOverride, "stale");
+
     const clear = await revision(assign(workAgent.id, workGroup.id));
     assert.equal((await preview(clear)).overridesRemoved, 1);
     assert.deepEqual(member((await apply(clear)).snapshot, workAgent.id).overrides, {});
+
     const removed = member(await save(assign(workAgent.id, null)), workAgent.id);
     assert.equal(removed.policyId, null);
     assert.equal(removed.overrides[personal], false);
@@ -685,6 +712,7 @@ try {
     assert.equal(choice(registered, personalAgent.id, work).allowed, false);
     assert.equal(await connection("work_mail_renamed", work, "work"), work);
     assert.equal(choice(await read(), personalAgent.id, work).allowed, false);
+
     const stale = await revision(override(personalAgent.id, personal, false));
     await preview(stale);
     await runCauseEffect(agents.setMcpServerEnabled({ mcpServerId: personal, enabled: false }));
@@ -695,6 +723,7 @@ try {
     assert.equal(agents.agentAccessPolicy.allows(personalAgent.id, personal), false);
     await runCauseEffect(agents.setMcpServerEnabled({ mcpServerId: personal, enabled: true }));
     assert.equal(agents.agentAccessPolicy.allows(personalAgent.id, personal), true);
+
     const personalKey = mcpOAuthAccountKey(`${url}#account-personal`);
     assert.ok(personalKey);
     const personalRecord = records.get(personalKey);
@@ -707,6 +736,7 @@ try {
     assert.equal(reconnected.available, true);
     assert.equal(reconnected.source, "override");
     assert.equal(reconnected.allowed, true);
+
     await runCauseEffect(agents.removeMcpServer({ mcpServerId: work }));
     const recreated = await connection("work_mail_renamed", "", "work");
     assert.notEqual(recreated, work);
@@ -731,6 +761,7 @@ try {
     } finally {
       database.connection.exec("DROP TRIGGER fixture_reject_registration");
     }
+
     const id = await connection("failed_registration");
     assert.equal(choice(await read(), personalAgent.id, id).allowed, true);
     return { rolledBack: true, successfulRetry: true };
@@ -748,6 +779,7 @@ try {
     } finally {
       database.connection.exec("DROP TRIGGER fixture_reject_revision");
     }
+
     assert.equal((await apply(change)).status, "saved");
     return { rollback: true, sameRevisionRetry: true };
   });
@@ -764,6 +796,7 @@ try {
     assert.equal(loser?.failure.code, "stale");
     await refused(await revision(assign(workAgent.id, "missing-policy")), "invalid");
     assert.equal(agents.agentAccessPolicy.allows("missing-agent", personal), false);
+
     const before = store.agentAccessPolicies.membership(personalAgent.id);
     database.connection.exec("PRAGMA foreign_keys = OFF");
     try {
@@ -785,6 +818,7 @@ try {
 
   await step("Starting, running, compacting, and subagent sessions reject affected access edits", async () => {
     const revoke = await revision(override(personalAgent.id, personal, false));
+
     for (const state of ["start", "active"]) {
       const before = providerLog().length;
       const delivery = await send(personalAgent.id, `HOLD-${state.toUpperCase()}`);
@@ -797,11 +831,13 @@ try {
       await writeFile(join(root, `release-${state}`), "");
       await done(delivery);
     }
+
     const compact = runCauseEffect(agents.compactAgentContext(personalAgent.id));
     await waitFor("compaction", () => providerLog().some(({ kind }) => kind === "compacting"));
     await refused(revoke, "busy", personalAgent.id);
     await writeFile(join(root, "release-compact"), "");
     await compact;
+
     const childDelivery = await send(personalAgent.id, "HOLD-SUBAGENT");
     await waitFor("running provider subagent", () =>
       database
@@ -827,6 +863,7 @@ try {
     assert.equal(agents.agentAccessPolicy.allows(personalAgent.id, personal), false);
     assert.notEqual(store.agentAccessPolicies.pendingRefresh(personalAgent.id), null);
     assert.equal(privateSession(personalAgent), old);
+
     const denied = await mcpCall(route, "tools/list");
     assert.match(denied.body, /"code":-32001/u);
     const before = providerLog().length;
@@ -846,6 +883,7 @@ try {
         .some(({ kind }) => kind === "turn/start"),
     );
     assert.notEqual(store.agentAccessPolicies.pendingRefresh(personalAgent.id), null);
+
     await stop();
     await rm(join(root, "fail-refresh"));
     await start();
@@ -863,6 +901,7 @@ try {
     const deleted = await apply(remove);
     assert.equal(member(deleted.snapshot, personalAgent.id).policyId, null);
     assert.equal(member(deleted.snapshot, personalAgent.id).overrides[personal], false);
+
     assert.equal(agents.listAgents().find(({ id }) => id === personalAgent.id)?.threadId, personalAgent.threadId);
     assert.deepEqual(database.readConversation(personalAgent.id, personalAgent.threadId).messages, history);
     assert.equal(readFileSync(workspaceFile, "utf8"), "Personal workspace fixture.\n");
@@ -870,6 +909,7 @@ try {
       sidebar.getSnapshot().agentAssignments[personalAgent.id],
       beforeSidebar.agentAssignments[personalAgent.id],
     );
+
     assert.equal(agents.agentAccessPolicy.allows(personalAgent.id, COMPUTER_USE_MCP_SERVER_ID), true);
     assert.equal(
       agentComputerUseEnabled(agents.listAgents().find(({ id }) => id === personalAgent.id) ?? {}),
@@ -904,6 +944,7 @@ try {
     const rows = await runCauseEffect(agents.saveMcpServer({ config }));
     const row = rows.find(({ name }) => name === config.name);
     assert.ok(row);
+
     await save(assign(workAgent.id, workGroup.id));
     assert.equal(agents.agentAccessPolicy.allows(workAgent.id, row.id), false);
     const before = providerLog().length;
@@ -914,6 +955,7 @@ try {
         .some(({ kind }) => kind.startsWith("stdio:")),
     );
     assert.ok(!handedServers(workAgent).includes(row.name));
+
     await save(override(workAgent.id, row.id, true));
     assert.equal((await tool(workAgent.id, "test_mcp_server", { name: row.name })).success, true);
     assert.ok(handedServers(workAgent).includes(row.name));
@@ -953,6 +995,7 @@ try {
     );
     await done(await send(workAgent.id, "After approving the tool"));
     assert.equal(privateSession(workAgent), before);
+
     await writeFile(codexConfig, JSON.stringify(current));
     await done(await send(workAgent.id, "After revoking the tool approval"));
     assert.notEqual(privateSession(workAgent), before);
@@ -968,6 +1011,7 @@ try {
     const moving = current.agents.filter(({ policyId }) => policyId === workGroup.id);
     const before = agents.listAgents().map(({ id, threadId, workspacePath }) => ({ id, threadId, workspacePath }));
     assert.ok(moving.length > 1);
+
     const deletion = await revision({
       kind: "deletePolicy",
       policyId: workGroup.id,
@@ -978,6 +1022,7 @@ try {
     assert.ok(planned.overridesRemoved > 0);
     const moved = await apply(deletion);
     assert.equal(moved.status, "saved");
+
     for (const agent of moving) {
       assert.equal(member(moved.snapshot, agent.id).policyId, destination.id);
       assert.deepEqual(member(moved.snapshot, agent.id).overrides, {});
@@ -998,6 +1043,7 @@ try {
   await stop();
   await runCauseEffect(oauth.close());
   await new Promise<void>((done) => http.close(() => done()));
+
   await mkdir(out, { recursive: true });
   await writeFile(join(out, "report.json"), `${JSON.stringify(report, null, 2)}\n`);
   await rm(root, { recursive: true, force: true, maxRetries: 4, retryDelay: 100 }).catch((error: Error) => {

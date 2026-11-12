@@ -206,12 +206,14 @@ export class AgentTemplateService {
       const avatar = yield* this.readAvatar(agentId);
       if (avatar) form.set("avatar", new Blob([toArrayBuffer(avatar.bytes)], { type: avatar.mimeType }), "avatar");
       if (card) form.set("card", new Blob([toArrayBuffer(card)], { type: "image/png" }), "card.png");
+
       const access = this.agents.agentAccessPolicy?.restriction(agentId);
       if (access && (access.policyId !== null || Object.keys(access.overrides).length > 0)) {
         return yield* new AgentTemplateFailure({
           cause: new Error(sourceText("error.marketplace.agentAccessPolicyPublish")),
         });
       }
+
       const owned = yield* this.auth
         .requestAuthorized("/v1/agent-templates/", { method: "POST", body: form }, decodeOwnedTemplate, 30_000)
         .pipe(toAgentTemplateFailure);

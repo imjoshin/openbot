@@ -1214,9 +1214,11 @@ export function createMockOpenBot(options: MockOpenBotOptions = {}): MockOpenBot
   const billingPlans = previewBillingServers();
 
   const accessPoliciesByServer = new Map<string, ReturnType<typeof createMockAgentAccessPolicy>>();
+
   function mockAccessPolicies(serverId: string) {
     const current = accessPoliciesByServer.get(serverId);
     if (current) return current;
+
     const policies = createMockAgentAccessPolicy(
       serverId,
       () => agents,
@@ -1228,6 +1230,7 @@ export function createMockOpenBot(options: MockOpenBotOptions = {}): MockOpenBot
           available: server.enabled !== false,
         })),
     );
+
     accessPoliciesByServer.set(serverId, policies);
     return policies;
   }
@@ -1249,6 +1252,7 @@ export function createMockOpenBot(options: MockOpenBotOptions = {}): MockOpenBot
     });
     if (input.provider && input.model && input.providerAccountId) agent.providerAccountId = input.providerAccountId;
     beforeStart?.(agent.id);
+
     agents = [...agents, agent];
     queues.set(agent.id, emptyQueue(agent.id));
     emitAgentEvent({ type: "agents-changed", agents });
@@ -2585,6 +2589,7 @@ export function createMockOpenBot(options: MockOpenBotOptions = {}): MockOpenBot
             : { ownBrowserSession: true, browserProfileId: source.browserProfileId }),
           threadId: null,
         };
+
         mockAccessPolicies(serverId ?? "local").copyAgentAccess(agentId, agent.id);
         agents = [...agents, agent];
         queues.set(agent.id, emptyQueue(agent.id));

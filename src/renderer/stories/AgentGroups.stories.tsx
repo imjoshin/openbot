@@ -114,6 +114,7 @@ function RestrictedTransferStory() {
     ],
     destinationConnections: connections,
   };
+
   return (
     <main class="agent-memories-story-stage">
       <AgentAccessPolicyTransferView
@@ -125,6 +126,7 @@ function RestrictedTransferStory() {
         onPreview={(input) => {
           const policyId = input.agentMappings[0]?.policyId ?? null;
           const enabledConnectionIds = input.connectionMappings.map(({ destinationId }) => destinationId);
+
           setPreview({
             revision: input.expectedRevision,
             agents: [

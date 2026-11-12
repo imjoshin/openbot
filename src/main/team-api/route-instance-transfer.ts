@@ -40,22 +40,27 @@ export async function routeInstanceTransferMapping(
   }
   requireAgentAccessPolicy(context, policy);
   if (!instanceTransfer) throw new HttpError(400, sourceText("error.team.instanceTransferUnsupported"));
+
   if (path === getTransferMapping) {
     const input = await readAgentAccessPolicyInput(context, parseAgentAccessPolicyTransferSelection);
     return json(200, await answer(() => runCauseEffect(instanceTransfer.getTransferMapping(input, member.id)), 409));
   }
+
   const { input, timezone } = await readAgentAccessPolicyInput(context, (body) => ({
     input: parseAgentAccessPolicyTransferMapping(body),
     timezone: typeof body.timezone === "string" ? body.timezone : undefined,
   }));
+
   if (path === previewTransferMapping) {
     return json(
       200,
       await answer(() => runCauseEffect(instanceTransfer.previewTransferMapping(input, member.id)), 409),
     );
   }
+
   if (path === applyTransferMapping) {
     if (newAgentHidden()) throw new HttpError(400, sourceText("error.team.newAgentProviderLocalOnly"));
+
     const result = await answer(
       () =>
         runCauseEffect(
@@ -68,6 +73,7 @@ export async function routeInstanceTransferMapping(
     );
     return json(200, { ...result, agents: result.agents.map(({ id, name }) => ({ agentId: id, name })) });
   }
+
   return "unmatched";
 }
 

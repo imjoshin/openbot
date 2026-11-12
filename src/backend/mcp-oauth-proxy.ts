@@ -177,6 +177,7 @@ export class McpOAuthProxy {
       Effect.gen({ self: this }, function* () {
         if (this.#port !== null && this.#secret !== null && this.#bindingId !== null)
           return { port: this.#port, secret: this.#secret, bindingId: this.#bindingId };
+
         const saved = yield* mcpSync(() => this.#options.settings?.read() ?? null);
         const server = yield* this.#listen(saved?.port ?? 0).pipe(
           Effect.catch((error) => (saved?.port == null ? Effect.fail(error) : this.#listen(0))),
@@ -198,6 +199,7 @@ export class McpOAuthProxy {
         this.#port = address.port;
         this.#secret = secret;
         this.#bindingId = bindingId;
+
         if (this.#options.settings && saved?.bindingId !== bindingId) {
           yield* this.#options.settings.write({ port: address.port, secret, bindingId }).pipe(
             Effect.catch((error) =>
@@ -260,6 +262,7 @@ export class McpOAuthProxy {
     const [, route, agentKey] = /^\/mcp\/([0-9a-f]{32})(?:\/([0-9a-f]{32}))?$/u.exec(request.url ?? "") ?? [];
     if (!route || !authorized(request, routeBearer(secret, agentKey ? `${route}/${agentKey}` : route)))
       return refuse(response, 403);
+
     if (agentKey) {
       const active = this.#agentRequests.get(agentKey) ?? new Set();
       this.#agentRequests.set(agentKey, active);
@@ -269,6 +272,7 @@ export class McpOAuthProxy {
         if (active.size === 0) this.#agentRequests.delete(agentKey);
       });
     }
+
     const method = request.method ?? "";
     if (method !== "POST" && method !== "GET" && method !== "DELETE") {
       response.writeHead(405, { allow: "POST, GET, DELETE" });
@@ -281,6 +285,7 @@ export class McpOAuthProxy {
     if (!target) return refuseRequests(response, method, read, sourceText("error.backend.mcpOAuthSignInNeeded"));
     if (target === "denied")
       return refuseRequests(response, method, read, sourceText("error.agentAccessPolicy.connectionDenied"));
+
     const client = this.#options.client;
     const body = read && client ? yield* mcpSync(() => withClientInfo(read, request, client, agentKey ?? null)) : read;
     const upstream = yield* this.#forward(target, request, method, body, controller);

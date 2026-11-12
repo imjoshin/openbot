@@ -38,6 +38,7 @@ export function AgentAccessPolicyTransferView(props: {
     policies: Record<string, string | null>;
     connections: Record<string, string>;
   }>({ policies: {}, connections: {} });
+
   const label = (connection: Destination) =>
     connection.accountLabel
       ? t("server.agentGroups.connectionLabel", { name: connection.name, account: connection.accountLabel })
@@ -50,6 +51,7 @@ export function AgentAccessPolicyTransferView(props: {
 
   function preview() {
     if (!allMapped() || props.busy) return;
+
     props.onPreview({
       ...props.selection,
       expectedRevision: props.options.revision,
@@ -90,6 +92,7 @@ export function AgentAccessPolicyTransferView(props: {
                     const source = () =>
                       props.options.sourcePolicies.find((policy) => policy.id === agent.sourcePolicyId);
                     const selected = () => groups().find((group) => group.id === draft.policies[agent.key]) ?? null;
+
                     return (
                       <Item class="settings-modal-row">
                         <ItemContent>
@@ -136,6 +139,7 @@ export function AgentAccessPolicyTransferView(props: {
                         props.options.destinationConnections.find(
                           (connection) => connection.id === draft.connections[source.id],
                         ) ?? null;
+
                       return (
                         <Item class="settings-modal-row">
                           <ItemContent>

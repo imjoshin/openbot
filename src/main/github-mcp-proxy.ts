@@ -211,11 +211,13 @@ export class GitHubMcpProxy {
     yield* Effect.gen({ self: this }, function* () {
       yield* githubCall(() => mcp.connect(transport));
       const body = yield* readJsonBody(request, MAX_BODY_BYTES).pipe(toGitHubOperationError);
+
       if (!this.#authorized(request)) {
         response.writeHead(401, { "content-type": "application/json" });
         response.end(JSON.stringify({ error: "unauthorized" }));
         return;
       }
+
       yield* githubCall(() => transport.handleRequest(request, response, body));
     }).pipe(
       Effect.catch(() =>
@@ -369,12 +371,14 @@ export class GitHubMcpProxy {
   #authorized(request: IncomingMessage): boolean {
     const path = /^\/mcp(?:\/([0-9a-f]{32}))?$/u.exec(request.url ?? "");
     if (!path) return false;
+
     const header = request.headers.authorization;
     if (!header?.startsWith("Bearer ")) return false;
     const candidate = Buffer.from(header.slice("Bearer ".length));
     const agentKey = path[1];
     const secret = Buffer.from(this.#bearer(agentKey));
     if (candidate.length !== secret.length || !timingSafeEqual(candidate, secret)) return false;
+
     return (
       this.#options.allowsAgentKey === undefined || (agentKey !== undefined && this.#options.allowsAgentKey(agentKey))
     );

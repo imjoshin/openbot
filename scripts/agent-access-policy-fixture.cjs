@@ -44,6 +44,7 @@ function startTurn(message, params, reply) {
   const prompt = params.input.map((item) => item.text ?? "").join("\n");
   const text = prompt.split("\n\n--- current message ---\n").at(-1);
   log({ kind: "turn/start", threadId });
+
   const start = () => {
     reply({ turn: { id: turnId, status: "inProgress", items: [] } });
     notify("turn/started", threadId, turnId, { turn: { id: turnId } });
@@ -51,6 +52,7 @@ function startTurn(message, params, reply) {
       tokenUsage: { total: { totalTokens: 1000 }, last: { totalTokens: 1000 }, modelContextWindow: 100000 },
     });
   };
+
   if (text.includes("HOLD-START")) {
     log({ kind: "starting", threadId });
     return afterFlag("release-start", () => {
@@ -58,11 +60,14 @@ function startTurn(message, params, reply) {
       finish(threadId, turnId);
     });
   }
+
   start();
+
   if (text.includes("HOLD-ACTIVE")) {
     log({ kind: "active", threadId });
     return afterFlag("release-active", () => finish(threadId, turnId));
   }
+
   if (text.includes("HOLD-SUBAGENT")) {
     const child = `child-${turnId}`;
     const spawn = {
@@ -74,6 +79,7 @@ function startTurn(message, params, reply) {
       receiverThreadIds: [child],
       agentsStates: { [child]: { status: "running", message: null } },
     };
+
     notify("item/completed", threadId, turnId, { item: spawn });
     return afterFlag("release-subagent", () => {
       notify("item/completed", threadId, turnId, {
@@ -87,11 +93,13 @@ function startTurn(message, params, reply) {
       finish(threadId, turnId);
     });
   }
+
   const call = [...text.matchAll(/POLICY-CALL:([A-Za-z0-9+/=]+)/gu)].at(-1);
   if (call) {
     const { name, arguments: toolArguments } = JSON.parse(Buffer.from(call[1], "base64").toString("utf8"));
     const id = `tool-${message.id}`;
     waiting.set(id, { name, threadId, turnId });
+
     return write({
       id,
       method: "item/tool/call",
@@ -105,12 +113,14 @@ function startTurn(message, params, reply) {
       },
     });
   }
+
   finish(threadId, turnId);
 }
 
 function request(message) {
   const params = message.params ?? {};
   const reply = (result) => write({ id: message.id, result });
+
   switch (message.method) {
     case "initialize":
     case "thread/archive":
@@ -158,6 +168,7 @@ function request(message) {
       const { threadId } = params;
       const turnId = randomUUID();
       const item = { type: "contextCompaction", id: `compact-${turnId}` };
+
       reply({});
       notify("turn/started", threadId, turnId, { turn: { id: turnId } });
       notify("item/started", threadId, turnId, { item });
@@ -176,6 +187,7 @@ function request(message) {
 
 input.on("line", (line) => {
   const message = JSON.parse(line);
+
   if (args.includes("--mcp")) {
     const results = {
       initialize: {
@@ -189,8 +201,10 @@ input.on("line", (line) => {
     if (message.id !== undefined) write({ jsonrpc: "2.0", id: message.id, result: results[message.method] ?? {} });
     return;
   }
+
   if (message.method && message.id !== undefined) request(message);
   if (message.method || !waiting.has(message.id)) return;
+
   const { name, threadId, turnId } = waiting.get(message.id);
   waiting.delete(message.id);
   log({ kind: "tool", name, threadId, result: message.result ?? null, error: message.error ?? null });

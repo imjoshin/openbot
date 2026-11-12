@@ -465,9 +465,11 @@ try {
       }),
     );
   }
+
   const workConnection = source.agents.listMcpServers().find(({ name }) => name === "work-notes");
   const personalConnection = source.agents.listMcpServers().find(({ name }) => name === "personal-notes");
   assert.ok(workConnection && personalConnection);
+
   const policy = source.agents.agentAccessPolicy;
   let policySnapshot = await Effect.runPromise(policy.read(POLICY_ACTOR));
   const savedPolicy = await Effect.runPromise(
@@ -485,6 +487,7 @@ try {
     ),
   );
   policySnapshot = savedPolicy.snapshot;
+
   policySnapshot = (
     await Effect.runPromise(
       policy.apply(
@@ -511,6 +514,7 @@ try {
       POLICY_ACTOR,
     ),
   );
+
   const individualFile = join(root, "restricted-without-settings.zip");
   await runCauseEffect(
     source.transfer.exportTo(individualFile, {
@@ -536,6 +540,7 @@ try {
   const transferManifest = JSON.parse(new TextDecoder().decode(archive["openbot-transfer.json"]));
   pass("a restricted export uses version 2 so old importers refuse it", transferManifest.version === 2);
   pass("the export carries both policy memberships", transferManifest.accessPolicy?.memberships.length === 2);
+
   const individualArchive = unzipSync(new Uint8Array(await readFile(individualFile)));
   const individualManifest = JSON.parse(new TextDecoder().decode(individualArchive["openbot-transfer.json"]));
   pass(
@@ -625,6 +630,7 @@ try {
     "imported connections stay unavailable until the owner enables them",
     !importedWork.available && !importedPersonal.available,
   );
+
   const collisionPreview = await runCauseEffect(target.transfer.stage(file));
   await assert.rejects(
     runCauseEffect(
@@ -824,6 +830,7 @@ try {
       },
     }),
   );
+
   const individualPreview = await runCauseEffect(target.transfer.stage(individualFile));
   const selection = { token: individualPreview.token, keys: individualPreview.agents.map(({ key }) => key) };
   let options = await runCauseEffect(target.transfer.getTransferMapping(selection));
@@ -843,6 +850,7 @@ try {
       return { sourceId: id, destinationId: destination.id };
     }),
   };
+
   const countBeforeMapping = target.agents.listAgents().length;
   const firstDestination = mapping.connectionMappings[0]?.destinationId;
   assert.ok(firstDestination);
@@ -875,6 +883,7 @@ try {
     "duplicate or missing mappings and another member's token are refused before creation",
     target.agents.listAgents().length === countBeforeMapping,
   );
+
   await assert.rejects(runCauseEffect(target.transfer.applyTransferMapping(mapping)));
   pass(
     "an import mapping must be previewed before it can apply",
@@ -890,6 +899,7 @@ try {
     mappingReview.agents.some((agent) => agent.policyId === null && agent.allowNewConnections) &&
       mappingReview.agents.some((agent) => agent.policyId === importedDefaults.id && !agent.allowNewConnections),
   );
+
   const destinationPolicy = target.agents.agentAccessPolicy;
   const beforeRename = await Effect.runPromise(destinationPolicy.read(POLICY_ACTOR));
   await Effect.runPromise(
@@ -908,6 +918,7 @@ try {
   );
   await assert.rejects(runCauseEffect(target.transfer.applyTransferMapping(mapping)));
   pass("a stale import preview creates no agents", target.agents.listAgents().length === countBeforeMapping);
+
   options = await runCauseEffect(target.transfer.getTransferMapping(selection));
   assert.ok(options);
   const currentMapping = { ...mapping, expectedRevision: options.revision };
@@ -917,6 +928,7 @@ try {
     "explicit mapping imports both selected agents",
     mappedResult.agents.length === 2 && mappedResult.skipped.length === 0,
   );
+
   const mappedSnapshot = await Effect.runPromise(destinationPolicy.read(POLICY_ACTOR));
   const mappedWriterId = mappedResult.agents.find(({ name }) => name.startsWith("Writer"))?.id;
   const mappedEditorId = mappedResult.agents.find(({ name }) => name.startsWith("Editor"))?.id;

@@ -34,6 +34,7 @@ export function createAgentAccessPolicyResource(calls: () => AgentAccessPolicyCa
     error: undefined,
     notice: undefined,
   });
+
   let generation = 0;
   onCleanup(() => {
     generation += 1;
@@ -50,15 +51,18 @@ export function createAgentAccessPolicyResource(calls: () => AgentAccessPolicyCa
         draft.notice = undefined;
       }
     });
+
     try {
       const data = await api.list();
       if (request !== generation) return;
+
       setState((draft) => {
         draft.data = data;
         draft.busy = false;
       });
     } catch (error) {
       if (request !== generation) return;
+
       setState((draft) => {
         draft.data = undefined;
         draft.busy = false;
@@ -80,6 +84,7 @@ export function createAgentAccessPolicyResource(calls: () => AgentAccessPolicyCa
 
   async function preview(mutation: AgentAccessPolicyMutation, replace = false) {
     if (state.busy) return;
+
     const api = calls();
     const request = ++generation;
     setState((draft) => {
@@ -88,15 +93,18 @@ export function createAgentAccessPolicyResource(calls: () => AgentAccessPolicyCa
       draft.error = undefined;
       draft.notice = undefined;
     });
+
     try {
       const preview = await api.preview(snapshot(mutation));
       if (request !== generation) return;
+
       setState((draft) => {
         draft.review = { mutation, preview };
         draft.busy = false;
       });
     } catch (error) {
       if (request !== generation) return;
+
       setState((draft) => {
         draft.error = errorMessage(error, t("server.agentGroups.saveFailed"));
       });
@@ -107,15 +115,18 @@ export function createAgentAccessPolicyResource(calls: () => AgentAccessPolicyCa
   async function apply(onSaved?: (mutation: AgentAccessPolicyMutation) => void) {
     const review = state.review;
     if (!review || state.busy) return;
+
     const api = calls();
     const request = ++generation;
     setState((draft) => {
       draft.busy = true;
     });
+
     try {
       const mutation = snapshot(review.mutation);
       const result = await api.apply(mutation);
       if (request !== generation) return;
+
       setState((draft) => {
         draft.data = result.snapshot;
         draft.review = undefined;
@@ -134,6 +145,7 @@ export function createAgentAccessPolicyResource(calls: () => AgentAccessPolicyCa
       onSaved?.(mutation);
     } catch (error) {
       if (request !== generation) return;
+
       setState((draft) => {
         draft.error = errorMessage(error, t("server.agentGroups.saveFailed"));
       });
@@ -205,12 +217,14 @@ export function AgentAccessPolicyReview(props: {
       ids.map((id) => {
         const connection = props.resource.state.data?.connections.find((connection) => connection.id === id);
         if (!connection) return id;
+
         const label = connection.accountLabel
           ? t("server.agentGroups.connectionLabel", { name: connection.name, account: connection.accountLabel })
           : connection.name;
         return connection.available ? label : t("server.agentGroups.unavailableLabel", { name: label });
       }),
     );
+
   return (
     <ConfirmDialog
       open={Boolean(props.resource.state.review)}

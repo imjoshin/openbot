@@ -1892,6 +1892,7 @@ export const messages = defineMessages("mobile.server", {
     "These providers were signed in on the other server and are not signed in here. Sign in to them in Server settings › Providers.",
   "mobile.server.transfer.notImported": "Not imported",
   "mobile.server.transfer.warnings": "Check these",
+
   "mobile.server.agentGroups.permissions": "Permissions",
   "mobile.server.agentGroups.title": "Agent Groups",
   "mobile.server.agentGroups.description": "Set default MCP access for groups of agents.",
@@ -1950,6 +1951,7 @@ export const messages = defineMessages("mobile.server", {
   "mobile.server.agentGroups.unsupported": "Agent Groups are unavailable on this server.",
   "mobile.server.agentGroups.clear": "Clear overrides",
   "mobile.server.agentGroups.selectAgain": "Clear selection and choose a group again",
+
   "mobile.server.transferMapping.description":
     "Choose a destination group for each agent and a destination for each connection. Current access is kept. Other connections on this server stay Off.",
   "mobile.server.transferMapping.agents": "Destination groups",

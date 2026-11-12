@@ -394,8 +394,10 @@ export class InstanceTransferService {
     // Every key first: a message of one agent can name another agent of the file.
     for (const [index, agent] of agents.entries())
       keys.set(agent.id, isAgentImportKey(agent.id) ? agent.id : `agent-${index + 1}`);
+
     const accessPolicy = yield* this.#readAgentAccess(keys, input.includeSettings);
     const mcpServers = input.includeSettings ? this.options.settings.mcpServers() : [];
+
     for (const agent of agents) {
       const key = keys.get(agent.id) ?? agent.id;
       const prefix = agentPrefix(key);
@@ -599,18 +601,22 @@ export class InstanceTransferService {
   ): Effect.fn.Return<TransferAgentAccessData | null, ArchiveOperationError> {
     const policy = this.options.agents.agentAccessPolicy;
     if (!policy) return null;
+
     const snapshot = yield* policy.read(POLICY_TRANSFER_ACTOR).pipe(Effect.mapError(failure));
     const memberships = new Map(snapshot.agents.map((agent) => [agent.id, agent]));
     const selected: TransferAgentAccessData["memberships"][number][] = [];
+
     for (const [agentId, key] of keys) {
       const membership = memberships.get(agentId);
       if (!membership) return yield* archiveFailure(new Error(sourceText("error.import.agentNotInExport")));
       selected.push({ key, policyId: membership.policyId, overrides: membership.overrides });
     }
+
     const restricted = selected.some(
       ({ policyId, overrides }) => policyId !== null || Object.keys(overrides).length > 0,
     );
     if (!restricted && (!includeSettings || snapshot.policies.length === 0)) return null;
+
     const usedPolicies = new Set(selected.map(({ policyId }) => policyId));
     return {
       policies: includeSettings ? snapshot.policies : snapshot.policies.filter(({ id }) => usedPolicies.has(id)),
@@ -875,10 +881,13 @@ export class InstanceTransferService {
     const staged = yield* this.#selectMappingTransfer(input, owner);
     const access = staged.manifest.accessPolicy;
     if (!access) return null;
+
     const policy = this.options.agents.agentAccessPolicy;
     if (!policy) return yield* archiveFailure(policyMappingRequired());
+
     const destination = yield* policy.read(POLICY_TRANSFER_ACTOR).pipe(Effect.mapError(failure));
     const membership = new Map(access.memberships.map(({ key, policyId }) => [key, policyId]));
+
     return {
       revision: destination.revision,
       agents: staged.manifest.agents
@@ -923,11 +932,13 @@ export class InstanceTransferService {
   ): Effect.fn.Return<InstanceTransferResult, ArchiveOperationError> {
     const staged = yield* this.#selectMappingTransfer(input, owner);
     const mapped = yield* this.#planTransferMapping(staged, input);
+
     if (this.#staged.get(input.token) !== staged)
       return yield* archiveFailure(new Error(sourceText("error.import.exportClosed")));
     if (staged.reviewedMapping !== JSON.stringify(input)) {
       return yield* archiveFailure(new Error(sourceText("error.import.transferAgentAccessReviewRequired")));
     }
+
     this.#staged.delete(staged.token);
     const fallbackTimezone = timezone !== undefined && validTimezone(timezone) ? timezone : this.#timezone();
     return yield* this.#applyStaged(
@@ -983,6 +994,7 @@ export class InstanceTransferService {
     if (!staged || staged.owner !== owner)
       return yield* archiveFailure(new Error(sourceText("error.import.exportClosed")));
     if (staged.manifest.accessPolicy && !input.includeSettings) return yield* archiveFailure(policyMappingRequired());
+
     this.#staged.delete(staged.token);
     const fallbackTimezone = timezone !== undefined && validTimezone(timezone) ? timezone : this.#timezone();
     return yield* this.#applyStaged(staged, input, fallbackTimezone, actor ?? this.options.channelActor()).pipe(
@@ -1021,6 +1033,7 @@ export class InstanceTransferService {
     ) {
       return yield* archiveFailure(policyMappingRequired());
     }
+
     // Providers and custom agents first, so their warnings come first. Their models are not listed yet:
     // a save does not wait for model discovery, and an imported provider has no key. An agent on one
     // of them starts on the default model, and the warning asks the user to choose the model again.
@@ -1037,6 +1050,7 @@ export class InstanceTransferService {
     const agentIds = new Map<string, string>();
     const routineIds = new Map<string, string>();
     const policy = this.options.agents.agentAccessPolicy;
+
     for (const agent of selected) {
       const mappedAgent = mapped?.memberships.get(agent.key);
       const importedMembership = memberships.get(agent.key);
@@ -1052,6 +1066,7 @@ export class InstanceTransferService {
           : importedMembership
             ? () => importedMembership
             : undefined;
+
       const result = yield* Effect.result(
         this.#importAgent(archive, staged, agent, routineIds, warnings, fallbackTimezone, membership),
       );
@@ -1062,9 +1077,11 @@ export class InstanceTransferService {
         agentIds.set(agent.key, result.success.id);
       }
     }
+
     if (accessPolicy && (imported.length > 0 || (!mapped && accessPolicy.policies.length > 0))) {
       yield* this.options.recordAgentAccessImport?.(actor) ?? Effect.void;
     }
+
     // Chats after every agent and routine exists, so each link in a message finds its copy. Their
     // files go to the upload folder, which a restart clears, in a folder with a random name.
     const uploads = this.options.uploadDirectory;
@@ -1192,8 +1209,10 @@ export class InstanceTransferService {
         connections.set(server.id, server.id);
         continue;
       }
+
       const name = server.name.toLowerCase();
       if (existing.some((candidate) => candidate.name.toLowerCase() === name)) continue;
+
       // A file can name any command, so an imported server stays off until the user checks it.
       const input = { ...server, id: "", enabled: false };
       if (mapConnectionIds && port.createMcpServerForTransfer) {
@@ -1221,6 +1240,7 @@ export class InstanceTransferService {
     const snapshot = yield* policy.read(POLICY_TRANSFER_ACTOR).pipe(Effect.mapError(failure));
     const destination = new Set(snapshot.connections.map(({ id }) => id));
     const source = new Set(data.connectionIds);
+
     function remap(choices: AgentAccessPolicyChoices): AgentAccessPolicyChoices {
       return Object.fromEntries(
         Object.entries(choices).map(([id, allowed]) => {
@@ -1236,6 +1256,7 @@ export class InstanceTransferService {
       groups: data.policies.map((group) => ({ ...group, choices: remap(group.choices) })),
       members: data.memberships.map((member) => ({ ...member, overrides: remap(member.overrides) })),
     }));
+
     const groupsBySource = yield* policy.importPolicies(groups, POLICY_TRANSFER_ACTOR).pipe(Effect.mapError(failure));
     return yield* archiveSync(
       () =>

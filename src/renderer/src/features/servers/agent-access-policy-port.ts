@@ -6,6 +6,7 @@ export function agentAccessPolicyPort() {
 
 export function desktopAgentAccessPolicyCalls(serverId: string): AgentAccessPolicyCalls {
   const api = agentAccessPolicyPort();
+
   return {
     serverId,
     list: () => api.list(serverId),

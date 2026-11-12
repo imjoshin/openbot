@@ -2402,6 +2402,7 @@ export class TeamApiServer {
   #canReadMcpCatalog(connection: EventClientState): boolean {
     const { mcpServers, mcpServerOwners, store } = this.#options;
     if (!mcpServers || !connection.capabilities.has(MCP_SERVERS_CAPABILITY)) return false;
+
     const member = store.authenticate(connection.token);
     return (
       member !== null &&

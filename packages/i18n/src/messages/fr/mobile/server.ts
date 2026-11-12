@@ -1515,6 +1515,7 @@ export const messages = {
     "Ces fournisseurs étaient connectés sur l’autre serveur, mais ne le sont pas ici. Connectez-vous à eux dans Réglages du serveur › Fournisseurs.",
   "mobile.server.transfer.notImported": "Non importé",
   "mobile.server.transfer.warnings": "À vérifier",
+
   "mobile.server.agentGroups.permissions": "Autorisations",
   "mobile.server.agentGroups.title": "Groupes d’agents",
   "mobile.server.agentGroups.description": "Définissez l’accès MCP par défaut des groupes d’agents.",
@@ -1573,6 +1574,7 @@ export const messages = {
   "mobile.server.agentGroups.unsupported": "Les groupes d’agents sont indisponibles sur ce serveur.",
   "mobile.server.agentGroups.clear": "Effacer les exceptions",
   "mobile.server.agentGroups.selectAgain": "Effacer la sélection et choisir de nouveau un groupe",
+
   "mobile.server.transferMapping.description":
     "Choisissez un groupe de destination pour chaque agent et une destination pour chaque connexion. L’accès actuel est conservé. Les autres connexions de ce serveur restent bloquées.",
   "mobile.server.transferMapping.agents": "Groupes de destination",

@@ -476,6 +476,7 @@ export class GitHubConnectorService {
     if (!this.#agentConnected()) return null;
     const url = this.#mcpProxy?.url(agentId ? mcpOAuthProxyAgentKey(agentId) : undefined);
     if (!url && this.#allowsMcpAgentKey) return null;
+
     return {
       id: GITHUB_CONNECTOR_MCP_SERVER_ID,
       name: GITHUB_CONNECTOR_MCP_SERVER_NAME,
@@ -1024,10 +1025,12 @@ export class GitHubConnectorService {
     const port = attempt5.success;
     this.#mcpProxy = proxy;
     if (!record) return;
+
     if (record.mcpProxy?.port === port && record.mcpProxy.bindingId) {
       this.#mcpBindingId = record.mcpProxy.bindingId;
       return;
     }
+
     if (record.mcpProxy && record.mcpProxy.port !== port) {
       // Resumed sessions send the old secret to the old port, where another program now listens.
       this.#mcpProxySecret = randomBytes(32).toString("base64url");

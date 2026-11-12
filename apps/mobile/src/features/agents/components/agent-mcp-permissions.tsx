@@ -17,16 +17,20 @@ export function AgentMcpPermissions({ agentId, serverId }: { agentId: string; se
   const policy = useAgentAccessPolicies(serverId);
   const connectionText = useAgentPolicyConnectionText();
   const agent = policy.data?.agents.find((agent) => agent.id === agentId);
+
   if (!policy.available) return null;
   if (!agent || !policy.data) return <AgentPolicyStatus policy={policy} />;
+
   const data = policy.data;
   const group = data.policies.find((group) => group.id === agent.policyId);
   const count = Object.keys(agent.overrides).length;
   const differs = agent.connections.filter(
     (row) => row.override !== null && row.groupValue !== null && row.override !== row.groupValue,
   ).length;
+
   const assign = (policyId: string | null, keepOverrides = false) => {
     if (policyId === agent.policyId) return;
+
     void policy.requestPreview({
       kind: "assignAgent",
       expectedRevision: data.revision,
@@ -35,6 +39,7 @@ export function AgentMcpPermissions({ agentId, serverId }: { agentId: string; se
       keepOverrides,
     });
   };
+
   const override = (connectionId: string, allowed: boolean | null) => {
     void policy.requestPreview({
       kind: "setOverride",
@@ -44,10 +49,12 @@ export function AgentMcpPermissions({ agentId, serverId }: { agentId: string; se
       allowed,
     });
   };
+
   const reset = () => {
     const mutation: AgentAccessPolicyMutation = { kind: "resetOverrides", expectedRevision: data.revision, agentId };
     void policy.requestPreview(mutation);
   };
+
   if (policy.review) {
     const { mutation } = policy.review;
     return (
@@ -67,6 +74,7 @@ export function AgentMcpPermissions({ agentId, serverId }: { agentId: string; se
       </AgentPolicyReview>
     );
   }
+
   const summary = t("mobile.server.agentGroups.overrides", { count });
   return (
     <>
@@ -105,6 +113,7 @@ export function AgentMcpPermissions({ agentId, serverId }: { agentId: string; se
           {agent.connections.map((row) => {
             const connection = data.connections.find((item) => item.id === row.connectionId);
             if (!connection) return null;
+
             const { name, availability } = connectionText(connection);
             const different = row.override !== null && row.groupValue !== null && row.override !== row.groupValue;
             const source = group
@@ -119,6 +128,7 @@ export function AgentMcpPermissions({ agentId, serverId }: { agentId: string; se
                   { name: group.name },
                 )
               : t(row.source === "override" ? "mobile.server.agentGroups.custom" : "mobile.server.agentGroups.default");
+
             return (
               <AgentPolicyToggle
                 key={row.connectionId}

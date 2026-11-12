@@ -29,6 +29,7 @@ function migrateUpTo(database: DatabaseSync, version: number): void {
 function sourceDatabase(version: number, database = open()): DatabaseSync {
   database.exec("CREATE TABLE schema_migrations(version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)");
   migrateUpTo(database, version);
+
   database.exec(`
     INSERT INTO projection_threads
       (thread_id, agent_id, title, active_turn_id, created_at, updated_at, last_event_sequence)
@@ -72,7 +73,9 @@ describe("agent access policy migration", () => {
     const database = sourceDatabase(source);
     if (source < 60) migrateUpTo(database, 60);
     const before = oldContents(database);
+
     migrateOpenBotDatabase(database);
+
     expect(oldContents(database)).toEqual(before);
     expect(database.prepare("SELECT * FROM agent_access_policies").all()).toEqual([]);
     expect(database.prepare("SELECT * FROM agent_access_policy_memberships").all()).toEqual([]);
@@ -84,6 +87,7 @@ describe("agent access policy migration", () => {
     const root = mkdtempSync(join(tmpdir(), "openbot-policy-migration-"));
     const path = join(root, "openbot.db");
     let database = new DatabaseSync(path);
+
     try {
       sourceDatabase(60, database);
       const before = oldContents(database);
@@ -91,11 +95,13 @@ describe("agent access policy migration", () => {
         BEGIN SELECT RAISE(ABORT, 'fixture failure'); END;`);
       expect(() => migrateOpenBotDatabase(database)).toThrow("migration to version 61 failed");
       expect(database.prepare("PRAGMA foreign_keys").get()).toEqual({ foreign_keys: 1 });
+
       database.close();
       database = new DatabaseSync(path);
       expect(policyTables(database)).toEqual([]);
       expect(oldContents(database)).toEqual(before);
       expect(database.prepare("SELECT MAX(version) AS version FROM schema_migrations").get()).toEqual({ version: 60 });
+
       migrateOpenBotDatabase(database);
       database.close();
       database = new DatabaseSync(path);
@@ -110,8 +116,10 @@ describe("agent access policy migration", () => {
   it("rejects a downgrade and a missing migration marker before creating tables", () => {
     const database = sourceDatabase(60);
     const before = oldContents(database);
+
     database.exec("INSERT INTO schema_migrations VALUES (62, '2026-09-01')");
     expect(() => migrateOpenBotDatabase(database)).toThrow("newer than this application supports");
+
     database.exec("DELETE FROM schema_migrations WHERE version IN (59, 62)");
     expect(() => migrateOpenBotDatabase(database)).toThrow("missing version 59");
     expect(policyTables(database)).toEqual([]);

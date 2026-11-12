@@ -138,6 +138,7 @@ export function mcpServersFromGateway(
     (mayEdit(config) &&
       config.enabled &&
       (config.id ? allowed(config.id) || gateway.needsOAuth(config) : policy.allowsNew()));
+
   return {
     list: () => gateway.list().filter(({ id }) => permitted(id)),
     builtIn: () => gateway.builtIn().filter(({ id }) => allowed(id)),
@@ -298,11 +299,13 @@ const runMcpServerTool = Effect.fn("McpServerTools.handle")(function* (
       const reason = servers.redact(sourceText(key, { name: config.name, target: serverTarget(config) }));
       if (!(yield* call.approve(reason, config.transport === "stdio" ? config.workingDirectory || null : null)))
         return openBotToolFailure(sourceText("error.agent.mcpServerDeclined"));
+
       const savedWithoutAccess = () => openBotToolResult({ name: config.name, status: "saved_without_access" });
       if (servers.mayInspect?.(config) === false) {
         yield* servers.save(config);
         return savedWithoutAccess();
       }
+
       // A server that does not answer is not saved, so no agent is given a broken entry. A server that
       // needs a sign-in or a key is saved: the sign-in and the key belong to a saved row.
       const outcome = yield* servers.inspect(config);

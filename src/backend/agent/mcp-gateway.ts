@@ -194,10 +194,12 @@ export class McpGateway {
   ): Effect.fn.Return<McpEndpoint | McpEndpointRefusal, McpGatewayFailed> {
     if (agentId !== null && !this.#allows(agentId, config.id))
       return { error: sourceText("error.agentAccessPolicy.connectionDenied") };
+
     if (config.id === GITHUB_CONNECTOR_MCP_SERVER_ID) {
       const github = this.#githubConnector;
       const scoped = agentId !== null ? github?.mcpServer(agentId) : null;
       if (!github || !scoped) return { error: sourceText("error.agentAccessPolicy.connectionDenied") };
+
       const token = yield* github.mcpAuthorization(agentId).pipe(toMcpGatewayFailed);
       if (token) this.#handoff.recordSecret(token);
       return { url: scoped.url, authorization: token, proxied: false };
@@ -205,6 +207,7 @@ export class McpGateway {
     if (!this.#proxied(config))
       return { url: withoutMcpAccountFragment(config.url), authorization: null, proxied: false };
     if (agentId === null) return { error: sourceText("error.agentAccessPolicy.connectionDenied") };
+
     const route = yield* this.#proxy
       .route(mcpOAuthProxyRoute(config.id, config.url), mcpOAuthProxyAgentKey(agentId))
       .pipe(Effect.result);
@@ -232,6 +235,7 @@ export class McpGateway {
       ? (this.#githubConnector?.mcpBindingId?.() ?? null)
       : null;
     if (proxied.length === 0) return githubBinding;
+
     const identity = yield* this.#proxy.binding().pipe(Effect.result);
     // The hand-off leaves these rows out in this case, and the manifest records that.
     if (Result.isFailure(identity)) return JSON.stringify([null, proxied]);
@@ -274,11 +278,13 @@ export class McpGateway {
     const oauth = this.#oauth;
     const agent = agentKey === null ? null : this.#agents().find(({ id }) => mcpOAuthProxyAgentKey(id) === agentKey);
     if (!agent) return Effect.succeed("denied");
+
     const config = this.#servers
       .listEnabled()
       .find((row) => this.#proxied(row) && mcpOAuthProxyRoute(row.id, row.url) === route);
     if (!config || !oauth?.signedIn(config.url)) return Effect.succeed(null);
     if (!this.#allows(agent.id, config.id)) return Effect.succeed("denied");
+
     return oauth.accessToken(config.url).pipe(
       // The row address with its account: a refresh after a refusal reads the sign-in of this row.
       Effect.map((token) =>
@@ -313,6 +319,7 @@ export class McpGateway {
   policyConnections(): AgentAccessPolicyConnection[] {
     const configs = this.#servers.list();
     const github = this.#githubConnector?.mcpServer();
+
     return [
       ...configs.map((config) => ({
         id: config.id,
@@ -505,6 +512,7 @@ export class McpGateway {
         error: sourceText("error.backend.mcpOAuthSignInNeeded"),
         needs: "sign_in",
       } satisfies McpProbeOutcome;
+
     const stored = this.#oauth;
     const silent: Pick<McpOAuthAuthority, "accessToken" | "signIn"> | undefined = stored
       ? { accessToken: (url) => stored.accessToken(url), signIn: () => null }

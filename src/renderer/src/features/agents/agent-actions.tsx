@@ -90,8 +90,10 @@ const AgentActions = createSimpleContext({
       const welcomeSupported = local || activeServerSupportsCapability(AGENT_WELCOME_CAPABILITY);
       const agent = newAgentInput(draft, createModelSupported, welcomeSupported);
       const policy = draft.accessPolicy;
+
       if (!policy) return agentsPort().agent.createAgent(agent);
       if (policy.serverId !== activeServerId()) throw new Error(sourceText("error.agentAccessPolicy.stale"));
+
       return agentAccessPolicyPort().createAgent(
         { agent, policyId: policy.policyId, expectedRevision: policy.expectedRevision },
         policy.serverId,

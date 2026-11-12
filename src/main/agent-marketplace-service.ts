@@ -194,12 +194,14 @@ export class AgentMarketplaceService {
         const bytes = new Uint8Array(yield* marketplaceIO(() => readFile(avatar.path)));
         form.set("avatar", new Blob([toArrayBuffer(bytes)], { type: avatar.mimeType }), "avatar");
       }
+
       const access = this.agents.agentAccessPolicy?.restriction(input.agentId);
       if (access && (access.policyId !== null || Object.keys(access.overrides).length > 0)) {
         return yield* new AgentMarketplaceFailure({
           cause: new Error(sourceText("error.marketplace.agentAccessPolicyPublish")),
         });
       }
+
       const submission = yield* this.auth
         .requestAuthorized("/v1/marketplace/agents/", { method: "POST", body: form }, decodeAgentSubmission, 30_000)
         .pipe(toAgentMarketplaceFailure);

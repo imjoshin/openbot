@@ -174,8 +174,10 @@ export function WebAgentSettings(props: {
             }
           : {}),
       };
+
       if (value.accessPolicy) await props.createWithPolicy(agent, value.accessPolicy);
       else await props.runtime.createAgent(agent);
+
       created = true;
       if (!disposed) {
         await props.onSaved();
@@ -191,6 +193,7 @@ export function WebAgentSettings(props: {
             sourceText("error.agentAccessPolicy.invalid"),
             sourceText("error.agentAccessPolicy.forbidden"),
           ].includes(error.message);
+
         setState((draft) => {
           draft.error = rejectedPolicy
             ? errorMessage(error, t("webClient.agent.unconfirmed"))

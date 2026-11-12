@@ -375,6 +375,7 @@ export class ThreadLifecycle {
     const agents = this.#store.list().filter((agent) => includes(agent.id));
     // Mark every affected agent before a provider release yields to another start.
     for (const agent of agents) this.#pendingRuntimeRefreshes.add(agent.id);
+
     for (const agent of agents) yield* this.applyPendingRuntimeRefresh(agent);
   }, Effect.uninterruptible).bind(this);
 
@@ -1371,6 +1372,7 @@ export class ThreadLifecycle {
     // Older manifests included every disabled key. Accept that hash when the list still matches.
     const compatibleKeys =
       ownServerKeys.length === legacyServerKeys.length ? [ownServerKeys] : [ownServerKeys, legacyServerKeys];
+
     // Also the form of a session from before the section-mates went with the turns, with their ids.
     // That session keeps the old list in its instructions, and its first turn sends the current one.
     const matches = (sessionApprovals: CodexToolApprovals, sections: readonly (SectionTeammates | null)[]) =>
@@ -1802,8 +1804,10 @@ export class ThreadLifecycle {
     if (this.#pendingStarts.has(agentId) || !this.#compaction.mayDrain(agentId)) return false;
     if (this.#mailbox.startingDeliveriesForAgent(agentId).some(({ delivery }) => !startingDeliveryIds.has(delivery.id)))
       return false;
+
     const threadIds = this.#store.database.activeProviderSessionThreads(agentId);
     if (threadIds.some((threadId) => this.#activeTurnOf(agentId, threadId) !== null)) return false;
+
     for (const threadId of threadIds) yield* this.#refreshThreadRuntime(threadId, null, true);
     return true;
   }, Effect.uninterruptible).bind(this);
@@ -1867,10 +1871,12 @@ export class ThreadLifecycle {
       }
       return;
     }
+
     if (strict) {
       for (const session of sessions)
         yield* this.#releaseProviderSession(session.externalSessionId, undefined, false, true);
     }
+
     this.#store.database.deactivateProviderSessions(threadId);
     for (const session of sessions) {
       // The client first, while the routing entry below still names it. Dropping the entry alone

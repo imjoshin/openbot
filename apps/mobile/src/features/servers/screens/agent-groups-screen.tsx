@@ -32,6 +32,7 @@ export function ServerPermissionsScreen() {
   const { serverId } = useLocalSearchParams<{ serverId: string }>();
   const roles = useMobileWorkspaceSelector((workspace) => workspace.canManageServerRoles(serverId));
   const groups = useMobileWorkspaceSelector((workspace) => workspace.canManageAgentAccessPolicy(serverId));
+
   return (
     <SettingsContent>
       <SettingsSection>
@@ -62,6 +63,7 @@ export function AgentGroupsScreen() {
   const policy = useAgentAccessPolicies(serverId);
   const open = (policyId?: string) =>
     router.push({ pathname: "/server-settings/agent-group", params: { serverId, ...(policyId ? { policyId } : {}) } });
+
   return (
     <SettingsContent>
       <AgentPolicyStatus policy={policy} />
@@ -103,6 +105,7 @@ export function AgentGroupScreen() {
   const { serverId, policyId } = useLocalSearchParams<{ serverId: string; policyId?: string }>();
   const policy = useAgentAccessPolicies(serverId);
   const group = policy.data?.policies.find((group) => group.id === policyId);
+
   return (
     <SettingsContent>
       <AgentPolicyStatus policy={policy} />
@@ -128,6 +131,7 @@ function AgentGroupEditor({
 }) {
   const { t } = useText();
   const connectionText = useAgentPolicyConnectionText();
+
   const [name, setName] = useState(group?.name ?? "");
   const [allowNewConnections, setAllowNewConnections] = useState(group?.allowNewConnections ?? false);
   const [choices, setChoices] = useState<Record<string, boolean>>({});
@@ -135,6 +139,7 @@ function AgentGroupEditor({
   const [assignments, setAssignments] = useState<Record<string, Assignment>>({});
   const [deleting, setDeleting] = useState(false);
   const [destination, setDestination] = useState<string | null>();
+
   const choice = (id: string) => choices[id] ?? group?.choices[id] ?? group?.allowNewConnections ?? false;
   const groupHasAgents = group !== undefined && data.agents.some((agent) => agent.policyId === group.id);
   const dirty =
@@ -142,6 +147,7 @@ function AgentGroupEditor({
     allowNewConnections !== (group?.allowNewConnections ?? false) ||
     Object.keys(choices).length > 0 ||
     Object.keys(assignments).length > 0;
+
   if (policy.review) {
     const { mutation, preview } = policy.review;
     return (
@@ -152,6 +158,7 @@ function AgentGroupEditor({
       </AgentPolicyReview>
     );
   }
+
   if (deleting && group) {
     return (
       <>
@@ -196,6 +203,7 @@ function AgentGroupEditor({
       </>
     );
   }
+
   return (
     <>
       <SheetFormField
@@ -253,6 +261,7 @@ function AgentGroupEditor({
             const source =
               data.policies.find((group) => group.id === agent.policyId)?.name ??
               t("mobile.server.agentGroups.noGroup");
+
             return (
               <AgentPolicyToggle
                 key={agent.id}
@@ -281,6 +290,7 @@ function AgentGroupEditor({
                     const draft = { ...current };
                     if (next === assigned) delete draft[agent.id];
                     else draft[agent.id] = { agentId: agent.id, assigned: next, keepOverrides: false };
+
                     return draft;
                   })
                 }

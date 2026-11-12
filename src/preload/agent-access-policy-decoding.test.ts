@@ -18,6 +18,7 @@ describe("agent access policy preload decoding", () => {
       ...snapshot,
       connections: [{ ...snapshot.connections[0], token: "fixture-secret", headers: [] }],
     });
+
     expect(decoded).toEqual(snapshot);
   });
 

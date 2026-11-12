@@ -1097,6 +1097,7 @@ try {
       verify(null, Buffer.from(hostTranscript), identity.publicKey, Buffer.from(ready.signature, "base64url")),
       "The host signature does not verify with the host key that the client pinned.",
     );
+
     connection.bridge.emit(
       "data",
       connection.peerId,
@@ -1270,6 +1271,7 @@ try {
     const routes = AGENT_ACCESS_POLICY_ROUTES;
     const full = teamCapabilitiesForProtocol(TEAM_PROTOCOL_V9);
     const admin = await confirmV2(await connectV2("policy-admin", "valid", "admin"));
+
     const call = async (
       connection: Awaited<ReturnType<typeof connectV2>>,
       path: string,
@@ -1293,6 +1295,7 @@ try {
       );
       return connection.bridge.rpcFrom(from, rpcResponse(requestId));
     };
+
     const request = async (path: string, body: unknown) => {
       const codec = AGENT_ACCESS_POLICY_CODECS.get(path);
       assert.ok(codec);
@@ -1302,6 +1305,7 @@ try {
       assert.equal(result.status, 200);
       return codec.response(200, result.body);
     };
+
     const expectRefusal = async (
       connection: Awaited<ReturnType<typeof connectV2>>,
       path: string,
@@ -1315,6 +1319,7 @@ try {
       assert.equal(frame.error.retryable, false);
       return frame.error;
     };
+
     await expectRefusal(v2, routes.list, {}, 403);
     await expectRefusal(v2, routes.apply, { kind: "invalid" }, 403);
     await expectRefusal(admin, routes.list, {}, 400, teamCapabilitiesForProtocol(8));
@@ -1325,6 +1330,7 @@ try {
       400,
       full.filter((capability) => capability !== AGENT_ACCESS_POLICY_CAPABILITY),
     );
+
     const initial = decodeAgentAccessPolicySnapshot(await request(routes.list, {}));
     assert.ok(initial.agents.some(({ id }) => id === source.id));
     const mutation = {
@@ -1342,6 +1348,7 @@ try {
     const assignment = saved.snapshot.agents.find(({ id }) => id === source.id)?.policyId;
     assert.ok(assignment && saved.snapshot.policies.some(({ id }) => id === assignment));
     await expectRefusal(admin, routes.apply, mutation, 409);
+
     const create = {
       agent: { name: "Grouped fixture", description: "", avatarSeed: "grouped", avatarHue: null, initialMessage: "Hi" },
       policyId: assignment,
@@ -1355,6 +1362,7 @@ try {
       { ...create, expectedRevision: saved.snapshot.revision, policyId: "missing-policy" },
       400,
     );
+
     const malformedReplies = [];
     for (const malformed of [
       { ...mutation, expectedRevision: -1 },
@@ -1379,6 +1387,7 @@ try {
         filtered.agents.every(({ id }) => id !== source.id),
         "A hidden agent is visible in policy settings.",
       );
+
       const hidden = await expectRefusal(
         admin,
         routes.preview,
@@ -1396,6 +1405,7 @@ try {
         sameAsHidden: JSON.stringify(absent.error) === JSON.stringify(hidden),
         status: absent.error.status,
       });
+
       for (const agentId of [source.id, "absent-agent"]) {
         const refusedAssignment = await call(admin, routes.apply, {
           ...mutation,
@@ -1409,6 +1419,7 @@ try {
           status: refusedAssignment.error.status,
         });
       }
+
       const deletion = decodeAgentAccessPolicyPreview(
         await request(routes.preview, {
           kind: "deletePolicy",
@@ -1433,6 +1444,7 @@ try {
     const keys = owned.agents.map(({ key }) => key);
     assert.equal(keys.length, 1);
     const selection = { token: owned.token, keys };
+
     await expectRefusal(v2, routes.getTransferMapping, selection, 403);
     const closed = await expectRefusal(admin, routes.getTransferMapping, { ...selection, token: foreign.token }, 409);
     assert.equal(closed.message, sourceText("error.import.exportClosed"));
@@ -1442,6 +1454,7 @@ try {
       { ...selection, includeSettings: false, timezone: "UTC" },
       409,
     );
+
     const options = decodeAgentAccessPolicyTransferOptions(await request(routes.getTransferMapping, selection));
     assert.ok(options);
     const mapping = {
@@ -1456,6 +1469,7 @@ try {
     const changed = { ...mapping, agentMappings: mapping.agentMappings.map(({ key }) => ({ key, policyId: null })) };
     const unreviewed = await expectRefusal(admin, routes.applyTransferMapping, changed, 409);
     assert.equal(unreviewed.message, sourceText("error.import.transferAgentAccessReviewRequired"));
+
     const applied = await Promise.all([
       call(admin, routes.applyTransferMapping, mapping),
       call(admin, routes.applyTransferMapping, mapping),

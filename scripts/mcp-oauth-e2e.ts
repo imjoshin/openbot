@@ -861,6 +861,7 @@ async function proxyCases(auth: Awaited<ReturnType<typeof startAuthorizationServ
       "prompts/list",
       "prompts/get",
     ];
+
     denied.add(`agent-fixture/${account.id}`);
     const beforeRevoked = resource.hits.length;
     for (const method of revokedCalls) {
@@ -873,9 +874,11 @@ async function proxyCases(auth: Awaited<ReturnType<typeof startAuthorizationServ
         },
         body: JSON.stringify({ jsonrpc: "2.0", id: 1, method }),
       });
+
       assert.equal(response.status, 200);
       assert.match(await response.text(), /"code":-32001/u);
     }
+
     assert.equal(resource.hits.length, beforeRevoked);
     assert.equal(
       textOf(await client.callTool({ name: "echo", arguments: { text: "other connection" } })),

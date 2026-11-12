@@ -19,6 +19,7 @@ export function useAgentAccessPolicies(serverId: string) {
   const { loadAgentAccessPolicies, previewAgentAccessPolicy, applyAgentAccessPolicy } = useMobileWorkspaceActions();
   const scope = useQueryScope();
   const client = useQueryClient();
+
   const key = queryKeys.agentAccessPolicies(scope, serverId);
   const scopeKey = JSON.stringify([...key, available]);
   const identity = useMemo(() => Symbol(scopeKey), [scopeKey]);
@@ -30,6 +31,7 @@ export function useAgentAccessPolicies(serverId: string) {
     };
   }, [identity]);
   const isCurrent = () => currentScope.current === identity;
+
   const query = useQuery({
     queryKey: key,
     enabled: available,
@@ -42,6 +44,7 @@ export function useAgentAccessPolicies(serverId: string) {
   const review = pendingReview?.scope === identity ? pendingReview : undefined;
   const [notice, setNotice] = useState<{ scope: symbol; text: string }>();
   const locked = useRef<symbol | null>(null);
+
   const preview = useMutation({
     mutationFn: async ({ scope, input }: ScopedMutation) => {
       if (currentScope.current !== scope) throw new Error(sourceText("error.agentAccessPolicy.stale"));
@@ -57,8 +60,10 @@ export function useAgentAccessPolicies(serverId: string) {
 
   async function requestPreview(mutation: AgentAccessPolicyMutation) {
     if (!available || !isCurrent() || locked.current === identity) return;
+
     locked.current = identity;
     apply.reset();
+
     try {
       const result = await preview.mutateAsync({ scope: identity, input: mutation });
       if (isCurrent()) setReview({ scope: identity, mutation, preview: result });
@@ -74,12 +79,14 @@ export function useAgentAccessPolicies(serverId: string) {
 
   async function confirm() {
     if (!available || !isCurrent() || !review || locked.current === identity) return false;
+
     locked.current = identity;
     try {
       const result = await apply.mutateAsync({ scope: identity, input: review.mutation });
       if (!isCurrent()) return false;
       await client.cancelQueries({ queryKey: key, exact: true });
       if (!isCurrent()) return false;
+
       client.setQueryData(key, result.snapshot);
       setReview(undefined);
       setNotice(
@@ -107,11 +114,13 @@ export function useAgentAccessPolicies(serverId: string) {
       if (locked.current === identity) locked.current = null;
     }
   }
+
   const loadError =
     available && query.error ? errorMessage(query.error, t("mobile.server.agentGroups.loadFailed")) : undefined;
   const currentPreview = preview.variables?.scope === identity ? preview : undefined;
   const currentApply = apply.variables?.scope === identity ? apply : undefined;
   const actionError = currentPreview?.error ?? currentApply?.error;
+
   return {
     available,
     data: available ? query.data : undefined,
@@ -120,6 +129,7 @@ export function useAgentAccessPolicies(serverId: string) {
     notice: notice?.scope === identity ? notice.text : undefined,
     reload: () => {
       if (!available || !isCurrent()) return;
+
       preview.reset();
       apply.reset();
       void query.refetch();
