@@ -54,7 +54,7 @@ export function buildAgentAccessTransferMapping(
   destination: AgentAccessPolicySnapshot,
   input: AgentAccessPolicyTransferMapping,
 ) {
-  if (destination.revision !== input.expectedRevision) throw new Error(sourceText("error.agentAccessPolicy.stale"));
+  if (destination.revision !== input.expectedRevision) throw new Error(sourceText("error.agent.accessPolicy.stale"));
 
   const groupById = new Map(destination.policies.map((policy) => [policy.id, policy]));
   const sourceGroupById = new Map(data.policies.map((policy) => [policy.id, policy]));

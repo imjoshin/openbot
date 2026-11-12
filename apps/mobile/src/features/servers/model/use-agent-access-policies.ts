@@ -47,13 +47,13 @@ export function useAgentAccessPolicies(serverId: string) {
 
   const preview = useMutation({
     mutationFn: async ({ scope, input }: ScopedMutation) => {
-      if (currentScope.current !== scope) throw new Error(sourceText("error.agentAccessPolicy.stale"));
+      if (currentScope.current !== scope) throw new Error(sourceText("error.agent.accessPolicy.stale"));
       return previewAgentAccessPolicy(input, serverId);
     },
   });
   const apply = useMutation({
     mutationFn: async ({ scope, input }: ScopedMutation) => {
-      if (currentScope.current !== scope) throw new Error(sourceText("error.agentAccessPolicy.stale"));
+      if (currentScope.current !== scope) throw new Error(sourceText("error.agent.accessPolicy.stale"));
       return applyAgentAccessPolicy(input, serverId);
     },
   });

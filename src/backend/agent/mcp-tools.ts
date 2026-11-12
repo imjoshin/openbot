@@ -128,7 +128,7 @@ export function mcpServersFromGateway(
     (failure: McpGatewayFailed) => new ToolOperationFailed({ cause: failure.cause }),
   );
   const deny = () =>
-    new ToolOperationFailed({ cause: new Error(sourceText("error.agentAccessPolicy.connectionDenied")) });
+    new ToolOperationFailed({ cause: new Error(sourceText("error.agent.accessPolicy.connectionDenied")) });
   const permitted = (id: string) => policy?.permits(id) ?? true;
   const allowed = (id: string) => policy?.allows(id) ?? true;
   const mayEdit = (config: McpServerConfig) =>

@@ -363,7 +363,7 @@ export const messages = {
   "server.settings.browsingMemoryDescription":
     "Gdy sterujesz przeglądarką agenta, agent uczy się działania stron z używanych przez Ciebie stron i przycisków. Wpisany tekst nie jest zapisywany.",
   "server.settings.browsingMemoryLoadFailed": "Nie udało się wczytać ustawienia przeglądania.",
-  "server.settings.rolesTitle": "Role",
+  "server.settings.rolesTitle": "Uprawnienia",
   "server.settings.rolesDescription":
     "Wybierz agentów, których mogą używać członkowie. Członek dostaje najwyższy dostęp spośród roli Wszyscy i swoich ról. Właściciele i administratorzy mogą używać wszystkich agentów.",
   "server.settings.remoteOnline": "Host jest online. Publikacją zarządza jego właściciel.",

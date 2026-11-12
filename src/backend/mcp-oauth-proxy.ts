@@ -284,7 +284,7 @@ export class McpOAuthProxy {
     const target = yield* this.#options.target(route, agentKey ?? null);
     if (!target) return refuseRequests(response, method, read, sourceText("error.backend.mcpOAuthSignInNeeded"));
     if (target === "denied")
-      return refuseRequests(response, method, read, sourceText("error.agentAccessPolicy.connectionDenied"));
+      return refuseRequests(response, method, read, sourceText("error.agent.accessPolicy.connectionDenied"));
 
     const client = this.#options.client;
     const body = read && client ? yield* mcpSync(() => withClientInfo(read, request, client, agentKey ?? null)) : read;

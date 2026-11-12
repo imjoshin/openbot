@@ -399,7 +399,7 @@ export const messages = {
   "server.settings.browsingMemoryDescription":
     "כשאתה שולט בדפדפן של סוכן, הסוכן לומד איך אתרים עובדים מהדפים והכפתורים שאתה משתמש בהם. טקסט שהקלדת לא נשמר.",
   "server.settings.browsingMemoryLoadFailed": "לא ניתן לטעון את הגדרת הגלישה.",
-  "server.settings.rolesTitle": "תפקידים",
+  "server.settings.rolesTitle": "הרשאות",
   "server.settings.rolesDescription":
     "יש לבחור את הסוכנים שחברים יכולים להשתמש בהם. חבר מקבל את רמת הגישה הגבוהה ביותר מבין כולם ותפקידיו. בעלים ומנהלים יכולים להשתמש בכל הסוכנים.",
   "server.settings.auditTitle": "יומן ביקורת",

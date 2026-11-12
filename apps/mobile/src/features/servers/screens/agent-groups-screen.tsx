@@ -41,7 +41,7 @@ export function ServerPermissionsScreen() {
             supportingText={t("mobile.server.roles.description")}
             onPress={() => router.push({ pathname: "/server-settings/roles", params: { serverId } })}
           >
-            <Typography.Paragraph>{t("mobile.server.route.roles")}</Typography.Paragraph>
+            <Typography.Paragraph>{t("mobile.server.roles.title")}</Typography.Paragraph>
           </SettingsRow>
         ) : null}
         {groups ? (

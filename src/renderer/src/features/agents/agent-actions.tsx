@@ -92,7 +92,7 @@ const AgentActions = createSimpleContext({
       const policy = draft.accessPolicy;
 
       if (!policy) return agentsPort().agent.createAgent(agent);
-      if (policy.serverId !== activeServerId()) throw new Error(sourceText("error.agentAccessPolicy.stale"));
+      if (policy.serverId !== activeServerId()) throw new Error(sourceText("error.agent.accessPolicy.stale"));
 
       return agentAccessPolicyPort().createAgent(
         { agent, policyId: policy.policyId, expectedRevision: policy.expectedRevision },

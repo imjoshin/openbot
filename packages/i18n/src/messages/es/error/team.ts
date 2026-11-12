@@ -182,6 +182,4 @@ export const messages = {
   "error.team.backgroundProcessesUnsupported": "Esta conexión no admite procesos en segundo plano.",
   "error.team.providerUseUnsupported": "Esta conexión no admite activar y desactivar proveedores.",
   "error.team.providerUseInvalid": "Este proveedor no tiene un interruptor de activación.",
-  "error.team.agentAccessPolicyUnsupported": "Este servidor no admite grupos de agentes.",
-  "error.team.agentAccessPolicyInvalid": "La solicitud de grupos de agentes no es válida.",
 } as const satisfies PartialTranslation<typeof source>;

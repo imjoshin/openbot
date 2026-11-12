@@ -189,9 +189,9 @@ export function WebAgentSettings(props: {
           value.accessPolicy &&
           error instanceof Error &&
           [
-            sourceText("error.agentAccessPolicy.stale"),
-            sourceText("error.agentAccessPolicy.invalid"),
-            sourceText("error.agentAccessPolicy.forbidden"),
+            sourceText("error.agent.accessPolicy.stale"),
+            sourceText("error.agent.accessPolicy.invalid"),
+            sourceText("error.agent.accessPolicy.forbidden"),
           ].includes(error.message);
 
         setState((draft) => {

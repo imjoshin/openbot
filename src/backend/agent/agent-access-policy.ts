@@ -40,11 +40,11 @@ export class AgentAccessPolicyFailed extends Schema.TaggedError<AgentAccessPolic
 
 function failure(code: Exclude<PolicyFailureCode, "busy">): AgentAccessPolicyFailed {
   const messages = {
-    invalid: sourceText("error.agentAccessPolicy.invalid"),
-    stale: sourceText("error.agentAccessPolicy.stale"),
-    forbidden: sourceText("error.agentAccessPolicy.forbidden"),
-    refresh: sourceText("error.agentAccessPolicy.refresh"),
-    storage: sourceText("error.agentAccessPolicy.storage"),
+    invalid: sourceText("error.agent.accessPolicy.invalid"),
+    stale: sourceText("error.agent.accessPolicy.stale"),
+    forbidden: sourceText("error.agent.accessPolicy.forbidden"),
+    refresh: sourceText("error.agent.accessPolicy.refresh"),
+    storage: sourceText("error.agent.accessPolicy.storage"),
   };
 
   return new AgentAccessPolicyFailed({ code, message: messages[code], agentIds: [] });
@@ -53,7 +53,7 @@ function failure(code: Exclude<PolicyFailureCode, "busy">): AgentAccessPolicyFai
 function failedBusy(agents: readonly Agent[]): AgentAccessPolicyFailed {
   return new AgentAccessPolicyFailed({
     code: "busy",
-    message: sourceText("error.agentAccessPolicy.busy", { agents: agents.map((agent) => agent.name).join(", ") }),
+    message: sourceText("error.agent.accessPolicy.busy", { agents: agents.map((agent) => agent.name).join(", ") }),
     agentIds: agents.map((agent) => agent.id),
   });
 }

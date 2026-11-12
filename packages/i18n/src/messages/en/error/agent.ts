@@ -163,4 +163,12 @@ export const messages = defineMessages("error.agent", {
   "error.agent.screenCaptureEmptyWindows":
     "Windows gave an empty image. Ask the user to unlock the computer and close protected content. A policy of the organization can also stop screen capture.",
   "error.agent.screenCaptureFailed": "The screen capture failed. Try again.",
+
+  "error.agent.accessPolicy.invalid": "This agent group change is invalid.",
+  "error.agent.accessPolicy.stale": "Agent permissions changed. Review the changes again.",
+  "error.agent.accessPolicy.busy": "Wait until these agents are idle: {agents}.",
+  "error.agent.accessPolicy.forbidden": "Only owners and admins can manage agent groups.",
+  "error.agent.accessPolicy.connectionDenied": "This agent cannot use this MCP connection.",
+  "error.agent.accessPolicy.refresh": "Permissions were saved. Wait for the agent to refresh its connections.",
+  "error.agent.accessPolicy.storage": "Could not read or save agent permissions.",
 });

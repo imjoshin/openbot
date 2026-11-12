@@ -3474,7 +3474,7 @@ function WebWorkspaceFrame(props: WebWorkspaceProps) {
                   agentAccessPolicy={activeAgentAccessPolicy()?.calls}
                   createWithPolicy={(agent, { serverId, policyId, expectedRevision }) => {
                     if (server()?.id !== serverId)
-                      return Promise.reject(new Error(sourceErrorText("error.agentAccessPolicy.stale")));
+                      return Promise.reject(new Error(sourceErrorText("error.agent.accessPolicy.stale")));
 
                     return runTeamEffect(
                       createAgentWithAccessPolicy(hostRequest(serverId), { agent, policyId, expectedRevision }).pipe(

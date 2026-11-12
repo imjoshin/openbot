@@ -345,7 +345,7 @@ const sections = {
   personality: { title: "server.settings.personalityTitle", description: "server.settings.personalityDescription" },
   vault: { title: "server.settings.vaultTitle", description: "server.settings.vaultDescription" },
   members: { title: "server.settings.membersTitle", description: "server.settings.membersDescription" },
-  permissions: { title: "server.agentGroups.permissions", description: "server.agentGroups.permissionsDescription" },
+  permissions: { title: "server.settings.rolesTitle", description: "server.agentGroups.permissionsDescription" },
   audit: { title: "server.settings.auditTitle", description: "server.settings.auditDescription" },
   desktop: { title: "server.settings.desktopTitle", description: "server.settings.desktopDescription" },
   mcp: { title: "server.settings.mcpTitle", description: "server.settings.mcpDescription" },
@@ -401,7 +401,7 @@ export function ServerSettingsModal(props: ServerSettingsModalProps) {
     if (section() === "import") return importDetail();
     if (section() === "permissions") {
       if (permissionsPage() === "roles") {
-        return roles.crumb() ?? { title: t("server.settings.rolesTitle"), back: backToPermissions };
+        return roles.crumb() ?? { title: t("server.members.roles"), back: backToPermissions };
       }
       if (permissionsPage() === "agent-groups") {
         return groupCrumb() ?? { title: t("server.agentGroups.title"), back: backToPermissions };
@@ -969,7 +969,7 @@ export function ServerSettingsModal(props: ServerSettingsModalProps) {
                   <Show when={roles.available()}>
                     <SettingsLinkRow
                       icon={<ShieldCheck aria-hidden="true" />}
-                      label={t("server.settings.rolesTitle")}
+                      label={t("server.members.roles")}
                       onClick={() => setPermissionsPage("roles")}
                     />
                   </Show>

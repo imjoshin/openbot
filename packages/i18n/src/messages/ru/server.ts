@@ -363,7 +363,6 @@ export const messages = {
   "server.settings.browsingMemoryDescription":
     "Когда вы управляете браузером агента, агент узнаёт, как работают сайты, по страницам и кнопкам, которые вы используете. Введённый текст не сохраняется.",
   "server.settings.browsingMemoryLoadFailed": "Не удалось загрузить настройку браузинга.",
-  "server.settings.rolesTitle": "Роли",
   "server.settings.remoteOnline": "Хост в сети. Публикацией управляет его владелец.",
   "server.settings.remoteOffline": "Хост не в сети. Публикацией управляет его владелец.",
   "server.settings.reachable": "Доступен из интернета. Войти могут только приглашённые.",

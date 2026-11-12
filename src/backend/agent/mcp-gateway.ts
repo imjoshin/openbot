@@ -193,12 +193,12 @@ export class McpGateway {
     agentId: string | null = null,
   ): Effect.fn.Return<McpEndpoint | McpEndpointRefusal, McpGatewayFailed> {
     if (agentId !== null && !this.#allows(agentId, config.id))
-      return { error: sourceText("error.agentAccessPolicy.connectionDenied") };
+      return { error: sourceText("error.agent.accessPolicy.connectionDenied") };
 
     if (config.id === GITHUB_CONNECTOR_MCP_SERVER_ID) {
       const github = this.#githubConnector;
       const scoped = agentId !== null ? github?.mcpServer(agentId) : null;
-      if (!github || !scoped) return { error: sourceText("error.agentAccessPolicy.connectionDenied") };
+      if (!github || !scoped) return { error: sourceText("error.agent.accessPolicy.connectionDenied") };
 
       const token = yield* github.mcpAuthorization(agentId).pipe(toMcpGatewayFailed);
       if (token) this.#handoff.recordSecret(token);
@@ -206,7 +206,7 @@ export class McpGateway {
     }
     if (!this.#proxied(config))
       return { url: withoutMcpAccountFragment(config.url), authorization: null, proxied: false };
-    if (agentId === null) return { error: sourceText("error.agentAccessPolicy.connectionDenied") };
+    if (agentId === null) return { error: sourceText("error.agent.accessPolicy.connectionDenied") };
 
     const route = yield* this.#proxy
       .route(mcpOAuthProxyRoute(config.id, config.url), mcpOAuthProxyAgentKey(agentId))

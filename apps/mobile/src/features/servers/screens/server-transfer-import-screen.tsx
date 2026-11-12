@@ -205,7 +205,7 @@ function ServerTransferImport({
       if (
         selection &&
         caught instanceof Error &&
-        caught.message.includes(sourceText("error.agentAccessPolicy.stale"))
+        caught.message.includes(sourceText("error.agent.accessPolicy.stale"))
       ) {
         try {
           const options = await getTransferMapping(selection, serverId);

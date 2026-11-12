@@ -244,7 +244,7 @@ export function createServerTransferStore(
   }
 
   function stale(error: unknown) {
-    return error instanceof Error && error.message.includes(sourceText("error.agentAccessPolicy.stale"));
+    return error instanceof Error && error.message.includes(sourceText("error.agent.accessPolicy.stale"));
   }
 
   async function previewMapping(input: AgentAccessPolicyTransferMapping): Promise<void> {

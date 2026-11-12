@@ -113,7 +113,7 @@ export function ServerPeopleSection({ server }: { server: MobileServer }) {
       />
       {canManageServerRoles(server.id) || canManageAgentAccessPolicy(server.id) ? (
         <LinkRow
-          label={t("mobile.server.agentGroups.permissions")}
+          label={t("mobile.server.route.roles")}
           icon={ShieldCheck}
           pathname="/server-settings/permissions"
           serverId={server.id}

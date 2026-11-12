@@ -358,7 +358,6 @@ export const messages = {
   "server.settings.browsingMemoryDescription":
     "Wenn du den Browser eines Agenten steuerst, lernt der Agent aus den Seiten und Schaltflächen, die du nutzt, wie Websites funktionieren. Eingegebener Text wird nicht gespeichert.",
   "server.settings.browsingMemoryLoadFailed": "Die Browsing-Einstellung konnte nicht geladen werden.",
-  "server.settings.rolesTitle": "Rollen",
   "server.settings.remoteOnline": "Der Host ist online. Sein Eigentümer steuert die Veröffentlichung.",
   "server.settings.remoteOffline": "Der Host ist offline. Sein Eigentümer steuert die Veröffentlichung.",
   "server.settings.reachable": "Online erreichbar. Nur eingeladene Personen können sich anmelden.",

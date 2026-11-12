@@ -1996,7 +1996,7 @@ export class OpenBotToolRouter {
       const servers = this.#mcpServers?.(senderAgentId);
       if (installed && servers) {
         if (!servers.list().some(({ id }) => id === installed.config.id))
-          return openBotToolFailure(sourceText("error.agentAccessPolicy.connectionDenied"));
+          return openBotToolFailure(sourceText("error.agent.accessPolicy.connectionDenied"));
         return yield* marketplaceAppStatus(servers, installed, (config) =>
           toolStep(() => this.#postMcpSignInCard(senderAgentId, executionThreadId, params.turnId, config)),
         );

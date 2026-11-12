@@ -34,10 +34,10 @@ export default function ServerSettingsLayout() {
       <Stack.Screen name="invite" options={{ title: t("mobile.server.route.invite") }} />
       <Stack.Screen name="member" options={{ title: t("mobile.server.route.member") }} />
       <Stack.Screen name="member-roles" options={{ title: t("mobile.server.roles.title") }} />
-      <Stack.Screen name="permissions" options={{ title: t("mobile.server.agentGroups.permissions") }} />
+      <Stack.Screen name="permissions" options={{ title: t("mobile.server.route.roles") }} />
       <Stack.Screen name="agent-groups" options={{ title: t("mobile.server.agentGroups.title") }} />
       <Stack.Screen name="agent-group" options={{ title: t("mobile.server.agentGroups.group") }} />
-      <Stack.Screen name="roles" options={{ title: t("mobile.server.route.roles") }} />
+      <Stack.Screen name="roles" options={{ title: t("mobile.server.roles.title") }} />
       {/* The page names its role in the name field. */}
       <Stack.Screen name="role" options={{ title: t("mobile.server.route.role") }} />
       <Stack.Screen name="audit" options={{ title: t("mobile.server.route.audit") }} />
