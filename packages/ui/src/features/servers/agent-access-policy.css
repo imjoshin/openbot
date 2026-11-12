@@ -1,0 +1,31 @@
+.agent-access-policy-review {
+  max-block-size: 15rem;
+  overflow-y: auto;
+}
+
+.agent-access-policy-summary {
+  flex-wrap: wrap;
+}
+
+.agent-access-policy-summary > .ui-item-content {
+  flex-basis: 11rem;
+}
+
+.agent-access-policy-summary > .ui-item-actions {
+  margin-inline-start: auto;
+}
+
+.agent-access-policy-summary .ui-item-title,
+.agent-access-policy-source,
+.agent-access-policy-review .ui-item-description {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.agent-access-policy-source > svg {
+  display: inline-block;
+  width: 0.875rem;
+  height: 0.875rem;
+  margin-inline-end: 0.375rem;
+  vertical-align: middle;
+}

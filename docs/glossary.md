@@ -22,8 +22,13 @@ table, IPC channel or product string, or when a term in the code disagrees with 
   `legacy-import:bots:v1`, and readable `~/OpenBot/Bots` path prefixes. Accept `bot-<uuid>` IDs from
   databases that did not run migration v13. `"first-bot"` is an avatar seed; `BloubBot` and the
   lucide `Bot` icon are library names.
+- **agent access policy**: default MCP connection permissions for assigned agents
+  (`AgentAccessPolicy`, `agent_access_policies`, `agent-access-policy-v1`). The UI calls this an
+  **Agent Group**. Each agent has zero or one policy and can have explicit On or Off overrides.
+  Policy membership is separate from sidebar sections and human roles. A connection ID identifies
+  one saved connection; its name or endpoint does not identify its account.
 - **channel**: the shared multi-agent chat (`ChannelStore`, `ChannelSummary`, `projection_channels`,
-  `channel-chats-v1`). **group** is not a product term: it means a sidebar section
+  `channel-chats-v1`). In existing code, **group** can mean a sidebar section
   (`SidebarPinnedGroup`, `create_section`), an IPC endpoint group (`IpcEndpointGroup`,
   `define-ipc-group.ts`), or an ARIA `role="group"`. An IPC **channel** is the wire name of an
   endpoint in `IPC_ENDPOINTS` (`ipc-endpoints.ts`); the product contract is `ipc-chat-channels.ts`.

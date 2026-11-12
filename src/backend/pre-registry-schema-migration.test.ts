@@ -183,7 +183,7 @@ function userTables(db: DatabaseSync): string[] {
   return db
     .prepare(
       `SELECT name FROM sqlite_master
-       WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name <> 'schema_migrations'
+       WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name <> 'schema_migrations' AND name NOT GLOB 'agent_access_polic*'
        ORDER BY name`,
     )
     .all()
@@ -231,7 +231,7 @@ function schemaShape(db: DatabaseSync) {
 }
 
 function expectHealthy(db: DatabaseSync): void {
-  expect(db.prepare("SELECT MAX(version) AS version FROM schema_migrations").get()).toEqual({ version: 60 });
+  expect(db.prepare("SELECT MAX(version) AS version FROM schema_migrations").get()).toEqual({ version: 61 });
   expect(db.prepare("PRAGMA foreign_keys").get()).toEqual({ foreign_keys: 1 });
   expect(db.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
   expect(db.prepare("PRAGMA integrity_check").get()).toEqual({ integrity_check: "ok" });

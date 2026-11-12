@@ -100,6 +100,14 @@ import {
 } from "@openbot/contracts/ipc-events";
 import { contextBridge, ipcRenderer, webUtils } from "electron";
 import {
+  decodeAgentAccessPolicyApplyResultFromMain,
+  decodeAgentAccessPolicyPreviewFromMain,
+  decodeAgentAccessPolicySnapshotFromMain,
+  decodeAgentAccessPolicyTransferOptionsFromMain,
+  decodeAgentAccessPolicyTransferPreviewFromMain,
+  decodeAgentCreatedWithAccessPolicyFromMain,
+} from "./agent-access-policy-decoding";
+import {
   decodeAccountUsageFromMain,
   decodeAgent,
   decodeAgentAnalyticsFromMain,
@@ -1240,6 +1248,15 @@ const openbotApi: OpenBotDesktopApi = {
     hostRemoveWhatsAppSender: decodeVoid,
     hostAnswerWhatsAppRequest: decodeVoid,
     hostSetWhatsAppOwnNumber: decodeVoid,
+  }),
+  agentAccessPolicy: bridgeGroup(IPC_ENDPOINTS.agentAccessPolicy, {
+    list: decodeAgentAccessPolicySnapshotFromMain,
+    preview: decodeAgentAccessPolicyPreviewFromMain,
+    apply: decodeAgentAccessPolicyApplyResultFromMain,
+    createAgent: decodeAgentCreatedWithAccessPolicyFromMain,
+    getTransferMapping: decodeAgentAccessPolicyTransferOptionsFromMain,
+    previewTransferMapping: decodeAgentAccessPolicyTransferPreviewFromMain,
+    applyTransferMapping: decodeInstanceTransferResult,
   }),
   hostAdmin: bridgeGroup(IPC_ENDPOINTS.hostAdmin, {
     updateIdentity: decodeServer,

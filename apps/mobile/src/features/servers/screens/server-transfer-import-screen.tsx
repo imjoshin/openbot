@@ -1,10 +1,16 @@
+import type {
+  AgentAccessPolicyTransferMapping,
+  AgentAccessPolicyTransferOptions,
+  AgentAccessPolicyTransferSelection,
+} from "@openbot/contracts/agent-access-policy-transfer";
 import { agentProviderName } from "@openbot/contracts/agent-providers";
 import type { InstanceTransferPreview, RemoteInstanceTransferResult } from "@openbot/contracts/ipc";
 import { INSTANCE_TRANSFER_REMOTE_BYTES } from "@openbot/contracts/team-protocol/instance-transfer-v1";
 import { sourceText } from "@openbot/i18n/source";
 import { useLocalSearchParams } from "expo-router";
 import { Typography } from "heroui-native";
-import { useEffect, useRef, useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
+import { useQueryScope } from "@/features/auth/context/mobile-session-context";
 import {
   agentContents,
   exportDate,
@@ -13,6 +19,7 @@ import {
   toggledKeys,
   transferContents,
 } from "@/features/servers/components/import-parts";
+import { TransferMapping } from "@/features/servers/components/transfer-mapping";
 import { pickZipUpload } from "@/features/servers/model/transfer-file";
 import {
   SettingsContent,
@@ -20,12 +27,20 @@ import {
   SettingsRow,
   SettingsSection,
 } from "@/features/settings/components/settings-content";
-import { useMobileWorkspace, useMobileWorkspaceActions } from "@/features/workspace/context/mobile-workspace-context";
+import {
+  useMobileWorkspaceActions,
+  useMobileWorkspaceSelector,
+} from "@/features/workspace/context/mobile-workspace-context";
 import { SheetSaveAction } from "@/shared/components/sheet-save-action";
 import { haptics } from "@/shared/lib/haptics";
 import { useText } from "@/shared/lib/text";
 
-type Phase = "idle" | "reading" | "review" | "importing" | "done";
+type Phase = "idle" | "reading" | "review" | "mapping" | "importing" | "done";
+
+/** Replaces the native header action after the review screen unmounts. */
+function ClearedImportAction() {
+  return <SheetSaveAction dirty={false} canSave={false} pending={false} onSave={() => undefined} />;
+}
 
 /**
  * Server settings › Transfer › Import. The chosen transfer file goes to the host, which keeps it under a
@@ -33,22 +48,54 @@ type Phase = "idle" | "reading" | "review" | "importing" | "done";
  * closes is released.
  */
 export function ServerTransferImportScreen() {
-  const { t, errorMessage } = useText();
   const { serverId } = useLocalSearchParams<{ serverId: string }>();
-  const { canTransferServer } = useMobileWorkspace();
-  const { stageInstanceTransfer, applyInstanceTransfer, discardInstanceTransfer } = useMobileWorkspaceActions();
+  const scope = useQueryScope();
+  const canTransfer = useMobileWorkspaceSelector((workspace) => workspace.canTransferServer(serverId));
+  const canMap = useMobileWorkspaceSelector((workspace) => workspace.canManageAgentAccessPolicy(serverId));
+  return (
+    <ServerTransferImport
+      key={JSON.stringify([scope, serverId, canTransfer, canMap])}
+      serverId={serverId}
+      canTransfer={canTransfer}
+      canMap={canMap}
+    />
+  );
+}
+
+function ServerTransferImport({
+  serverId,
+  canTransfer,
+  canMap,
+}: {
+  serverId: string;
+  canTransfer: boolean;
+  canMap: boolean;
+}) {
+  const { t, errorMessage } = useText();
+  const {
+    stageInstanceTransfer,
+    applyInstanceTransfer,
+    discardInstanceTransfer,
+    getTransferMapping,
+    applyTransferMapping,
+  } = useMobileWorkspaceActions();
   const [phase, setPhase] = useState<Phase>("idle");
   const [progress, setProgress] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [preview, setPreview] = useState<InstanceTransferPreview | null>(null);
   const [result, setResult] = useState<RemoteInstanceTransferResult | null>(null);
+  const [mapping, setMapping] = useState<{
+    selection: AgentAccessPolicyTransferSelection;
+    options: AgentAccessPolicyTransferOptions;
+    generation: number;
+  }>();
+  const locked = useRef(false);
 
   // The open token, for the release when the page closes. A token that comes back after that is
   // released when it arrives.
   const token = useRef<string | null>(null);
-  token.current = preview?.token ?? null;
   const closed = useRef(false);
-  useEffect(() => {
+  useLayoutEffect(() => {
     closed.current = false;
     return () => {
       closed.current = true;
@@ -56,9 +103,10 @@ export function ServerTransferImportScreen() {
     };
   }, [discardInstanceTransfer, serverId]);
 
-  if (!canTransferServer(serverId))
+  if (!canTransfer)
     return (
       <SettingsContent>
+        <ClearedImportAction />
         <SettingsNote>{t("mobile.server.transfer.unavailable")}</SettingsNote>
       </SettingsContent>
     );
@@ -73,47 +121,135 @@ export function ServerTransferImportScreen() {
         INSTANCE_TRANSFER_REMOTE_BYTES,
         sourceText("error.import.transferRemoteTooLarge"),
       );
+      if (closed.current) return;
       if (!upload) {
         setPhase(open ? "review" : "idle");
         return;
       }
-      const next = await stageInstanceTransfer(upload, serverId, (fraction) => setProgress(Math.floor(fraction * 100)));
+      const next = await stageInstanceTransfer(upload, serverId, (fraction) => {
+        if (!closed.current) setProgress(Math.floor(fraction * 100));
+      });
       if (open) void discardInstanceTransfer(open.token, serverId).catch(() => undefined);
       if (closed.current) {
         void discardInstanceTransfer(next.token, serverId).catch(() => undefined);
         return;
       }
+      token.current = next.token;
       setPreview(next);
       setPhase("review");
     } catch (caught) {
+      if (closed.current) return;
       setPhase(open ? "review" : "idle");
       setError(errorMessage(caught, t("mobile.server.transfer.openFailed")));
       void haptics.notification("error");
     } finally {
-      setProgress(null);
+      if (!closed.current) setProgress(null);
     }
   }
 
   async function apply(keys: string[], includeSettings: boolean) {
-    if (!preview) return;
+    if (!preview || locked.current) return;
+    locked.current = true;
+    setError(null);
+    if (!includeSettings && keys.length > 0 && canMap) {
+      setPhase("reading");
+      try {
+        const selection = { token: preview.token, keys };
+        const options = await getTransferMapping(selection, serverId);
+        if (closed.current) return;
+        if (options) {
+          setMapping((previous) => ({ selection, options, generation: (previous?.generation ?? 0) + 1 }));
+          setPhase("mapping");
+          return;
+        }
+      } catch (caught) {
+        if (!closed.current) {
+          setError(errorMessage(caught, t("mobile.server.transfer.importFailed")));
+          setPhase("review");
+        }
+        return;
+      } finally {
+        locked.current = false;
+      }
+    }
+    await finish(() => applyInstanceTransfer({ token: preview.token, keys, includeSettings }, serverId));
+  }
+
+  async function finish(
+    operation: () => Promise<RemoteInstanceTransferResult>,
+    selection?: AgentAccessPolicyTransferSelection,
+  ) {
+    locked.current = true;
     setPhase("importing");
     setError(null);
     try {
-      const done = await applyInstanceTransfer({ token: preview.token, keys, includeSettings }, serverId);
+      const done = await operation();
+      if (closed.current) return;
+      token.current = null;
+      setMapping(undefined);
       setPreview(null);
       setResult(done);
       setPhase("done");
       void haptics.notification("success");
     } catch (caught) {
+      if (closed.current) return;
+      if (
+        selection &&
+        caught instanceof Error &&
+        caught.message.includes(sourceText("error.agentAccessPolicy.stale"))
+      ) {
+        try {
+          const options = await getTransferMapping(selection, serverId);
+          if (closed.current) return;
+          if (options) {
+            setMapping((previous) => ({ selection, options, generation: (previous?.generation ?? 0) + 1 }));
+            setError(errorMessage(caught, t("mobile.server.transfer.importFailed")));
+            setPhase("mapping");
+            return;
+          }
+        } catch {
+          // If the file is no longer staged, return to file selection below.
+        }
+      }
       // The token is spent once the host starts, so the file must be chosen again.
+      token.current = null;
       setPreview(null);
+      setMapping(undefined);
       setPhase("idle");
       setError(errorMessage(caught, t("mobile.server.transfer.importFailed")));
       void haptics.notification("error");
+    } finally {
+      locked.current = false;
     }
   }
 
-  if (phase === "done" && result) return <TransferResult result={result} />;
+  if (phase === "done" && result)
+    return (
+      <>
+        <ClearedImportAction />
+        <TransferResult result={result} />
+      </>
+    );
+
+  if (mapping && (phase === "mapping" || phase === "importing"))
+    return (
+      <TransferMapping
+        key={mapping.generation}
+        serverId={serverId}
+        selection={mapping.selection}
+        options={mapping.options}
+        importing={phase === "importing"}
+        failure={error}
+        onApply={(input: AgentAccessPolicyTransferMapping) => {
+          if (!locked.current) void finish(() => applyTransferMapping(input, serverId), mapping.selection);
+        }}
+        onBack={() => {
+          setMapping(undefined);
+          setPhase("review");
+        }}
+        onReload={() => void apply([...mapping.selection.keys], false)}
+      />
+    );
 
   if (preview && phase !== "idle")
     return (
@@ -131,6 +267,7 @@ export function ServerTransferImportScreen() {
 
   return (
     <SettingsContent>
+      <ClearedImportAction />
       <SettingsSection
         title={t("mobile.server.transfer.import")}
         footer={error ?? t("mobile.server.transfer.importLede")}

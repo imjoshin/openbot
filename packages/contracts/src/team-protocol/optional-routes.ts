@@ -3,6 +3,7 @@ import { ACP_REGISTRY_CODECS } from "./acp-registry-v1";
 // HTTP and WebRTC transport encodes an admin route with its frozen codec. A path that is not listed
 // goes to the protocol adapter.
 import type { OptionalRouteCodec } from "./admin-wire";
+import { AGENT_ACCESS_POLICY_CODECS } from "./agent-access-policy-v1";
 import { AGENT_ACCESS_CODECS } from "./agent-access-v1";
 import { AGENT_ADMIN_CODECS } from "./agent-admin-v1";
 import { AGENT_BACKUP_MODELS_CODECS } from "./agent-backup-models-v1";
@@ -227,6 +228,7 @@ const CODECS: ReadonlyMap<string, OptionalRouteCodec> = new Map([
   ...ONEPASSWORD_CONNECTOR_CODECS,
   ...BITWARDEN_CONNECTOR_CODECS,
   ...AGENT_ACCESS_CODECS,
+  ...AGENT_ACCESS_POLICY_CODECS,
   ...AGENT_HIDDEN_CODECS,
   ...AGENT_COLORS_CODECS,
   ...CHAT_COLORS_CODECS,

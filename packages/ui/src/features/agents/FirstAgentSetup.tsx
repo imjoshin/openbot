@@ -27,11 +27,17 @@ import {
 import { ProviderModelPicker } from "../../components/ProviderModelPicker";
 import { currentText, useText } from "../../text";
 import { prefersReducedMotion } from "../../utils";
+import {
+  type AgentAccessPolicyCalls,
+  type AgentAccessPolicySelection,
+  AgentGroupCreationField,
+} from "../servers/AgentGroups";
 import { AgentAvatar } from "./AgentAvatar";
 import { avatarColorChoiceLabel } from "./avatar-hue-label";
 import { InstructionsLimit, instructionsTooLong } from "./InstructionsLimit";
 
 export interface FirstAgentDraft {
+  accessPolicy?: AgentAccessPolicySelection | undefined;
   name: string;
   purpose: string;
   avatarSeed: string;
@@ -62,6 +68,7 @@ export interface FirstAgentSuggestion {
 }
 
 export interface FirstAgentSetupProps {
+  agentAccessPolicy?: AgentAccessPolicyCalls | undefined;
   value: FirstAgentDraft;
   suggestions: FirstAgentSuggestion[];
   mode?: "first" | "additional";
@@ -572,6 +579,16 @@ export function FirstAgentSetup(props: FirstAgentSetupProps) {
                     />
                   )}
                 </Show>
+              )}
+            </Show>
+            <Show when={props.agentAccessPolicy}>
+              {(calls) => (
+                <AgentGroupCreationField
+                  calls={calls()}
+                  value={props.value.accessPolicy}
+                  disabled={props.submitting === true}
+                  onChange={(accessPolicy) => updateDraft({ accessPolicy })}
+                />
               )}
             </Show>
           </div>

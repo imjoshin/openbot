@@ -72,6 +72,7 @@ export function decodeImportManifest(
   if (!isDynamicRecord(value) || value.format !== FORMAT)
     throw new Error(sourceText("error.import.notAgentExport", { manifest: AGENT_IMPORT_MANIFEST }));
   if (value.version !== VERSION) throw new Error(sourceText("error.import.newerExportSkill"));
+  if ("accessPolicy" in value) throw new Error(sourceText("error.import.agentAccessMappingRequired"));
   const source = isDynamicRecord(value.source) ? value.source : {};
   const sourceApp = isBoundedString(source.app, AGENT_IMPORT_LIMITS.sourceApp) && source.app ? source.app : "unknown";
   const exportedAt =
@@ -162,6 +163,8 @@ function decodeAgent(
   memoryLimit: number,
 ): ImportAgent {
   if (!isDynamicRecord(value)) throw new Error(`Agent ${index + 1} is invalid.`);
+  if ("accessPolicy" in value || "mcpAccessPolicyId" in value || "mcpAccessOverrides" in value)
+    throw new Error(sourceText("error.import.agentAccessMappingRequired"));
   if (!isAgentImportKey(value.key)) throw new Error(`Agent ${index + 1} has an invalid key.`);
   const key = value.key;
   const name = isString(value.name) ? value.name.trim() : "";

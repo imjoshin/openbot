@@ -7,6 +7,8 @@
     "./live-activity-relay": "./src/live-activity-relay.ts",
     "./notification-relay": "./src/notification-relay.ts",
     "./agent-mention-rank": "./src/agent-mention-rank.ts",
+    "./agent-access-policy": "./src/agent-access-policy.ts",
+    "./agent-access-policy-transfer": "./src/agent-access-policy-transfer.ts",
     "./agent-providers": "./src/agent-providers.ts",
     "./feedback": "./src/feedback.ts",
     "./agent-welcome": "./src/agent-welcome.ts",
@@ -194,6 +196,7 @@
     "./team-protocol/providers-v4": "./src/team-protocol/providers-v4.ts",
     "./team-protocol/acp-registry-v1": "./src/team-protocol/acp-registry-v1.ts",
     "./team-protocol/agent-access-v1": "./src/team-protocol/agent-access-v1.ts",
+    "./team-protocol/agent-access-policy-v1": "./src/team-protocol/agent-access-policy-v1.ts",
     "./team-protocol/agent-colors-v1": "./src/team-protocol/agent-colors-v1.ts",
     "./team-protocol/chat-colors-v1": "./src/team-protocol/chat-colors-v1.ts",
     "./team-protocol/whatsapp-connector-v1": "./src/team-protocol/whatsapp-connector-v1.ts",
@@ -275,6 +278,7 @@
     "typecheck": "bun ../../scripts/type-checker.ts --noEmit -p tsconfig.json"
   },
   "dependencies": {
+    "effect": "catalog:",
     "emoji-regex": "10.6.0",
     "fflate": "catalog:",
     "marked": "catalog:"

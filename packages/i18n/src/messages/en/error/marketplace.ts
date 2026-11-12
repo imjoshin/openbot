@@ -1,6 +1,8 @@
 import { defineMessages } from "../../../message";
 
 export const messages = defineMessages("error.marketplace", {
+  "error.marketplace.agentAccessPolicyPublish":
+    "Use instance transfer to share this agent with its Agent Groups permissions.",
   // Agent marketplace and agent link errors.
   "error.marketplace.timezoneInvalid": "The local timezone is invalid.",
   "error.marketplace.installedAgentMissing": "The installed agent no longer exists.",

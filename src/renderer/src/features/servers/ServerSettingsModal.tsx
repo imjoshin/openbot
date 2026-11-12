@@ -39,10 +39,13 @@ import {
   Text,
   UsersRound,
 } from "@openbot/ui";
+import { SettingsLinkGroup, SettingsLinkRow } from "@openbot/ui/components/SettingsPanel";
 import type { LicenseCalls } from "@openbot/ui/features/billing/license-store";
+import { type AgentAccessPolicyCalls, AgentGroupsPanel } from "@openbot/ui/features/servers/AgentGroups";
 import type { ProviderSettingsDetail } from "@openbot/ui/features/settings/ProviderSettingsPage";
 import {
   SaveBarDock,
+  type SettingsCrumb,
   SettingsDialogShell,
   type SettingsPagePlacement,
 } from "@openbot/ui/features/settings/SettingsDialogShell";
@@ -277,6 +280,7 @@ export interface ServerSettingsModalProps {
    * remote host with `agent-access-v1` that this member administers.
    */
   agentAccess?: ServerAgentAccessOptions | undefined;
+  agentAccessPolicy?: AgentAccessPolicyCalls | undefined;
   /**
    * The Audit log section appears only when a caller supplies this, and only for the local server or
    * a remote host with `server-audit-v1` that this member administers.
@@ -316,12 +320,12 @@ export interface ServerHostedSitesOptions {
   onSeePlans?: (() => void) | undefined;
 }
 
-export type ServerSettingsSection =
+type Section =
   | "general"
   | "personality"
   | "vault"
   | "members"
-  | "roles"
+  | "permissions"
   | "audit"
   | "desktop"
   | "mcp"
@@ -333,14 +337,15 @@ export type ServerSettingsSection =
   | "transfer"
   | "routines"
   | "browser-profiles";
-type Section = ServerSettingsSection;
+type PermissionsPage = "roles" | "agent-groups";
+export type ServerSettingsSection = Section | PermissionsPage;
 
 const sections = {
   general: { title: "server.settings.generalTitle", description: "server.settings.generalDescription" },
   personality: { title: "server.settings.personalityTitle", description: "server.settings.personalityDescription" },
   vault: { title: "server.settings.vaultTitle", description: "server.settings.vaultDescription" },
   members: { title: "server.settings.membersTitle", description: "server.settings.membersDescription" },
-  roles: { title: "server.settings.rolesTitle", description: "server.settings.rolesDescription" },
+  permissions: { title: "server.agentGroups.permissions", description: "server.agentGroups.permissionsDescription" },
   audit: { title: "server.settings.auditTitle", description: "server.settings.auditDescription" },
   desktop: { title: "server.settings.desktopTitle", description: "server.settings.desktopDescription" },
   mcp: { title: "server.settings.mcpTitle", description: "server.settings.mcpDescription" },
@@ -360,7 +365,7 @@ const NAV_SECTIONS: ReadonlyArray<{ value: Section; icon: typeof Settings }> = [
   { value: "personality", icon: Smile },
   { value: "vault", icon: KeyRound },
   { value: "members", icon: UsersRound },
-  { value: "roles", icon: ShieldCheck },
+  { value: "permissions", icon: ShieldCheck },
   { value: "audit", icon: History },
   { value: "desktop", icon: Monitor },
   { value: "mcp", icon: Blocks },
@@ -377,6 +382,12 @@ const NAV_SECTIONS: ReadonlyArray<{ value: Section; icon: typeof Settings }> = [
 export function ServerSettingsModal(props: ServerSettingsModalProps) {
   const { t, errorMessage } = useText();
   const [section, setSection] = createSignal<Section>("general");
+  const [permissionsPage, setPermissionsPage] = createSignal<PermissionsPage | null>(null);
+  const [groupCrumb, setGroupCrumb] = createSignal<SettingsCrumb | null>(null);
+  const backToPermissions = () => {
+    setPermissionsPage(null);
+    setGroupCrumb(null);
+  };
   /** Set while the MCP panel shows a form, so the header reads `MCP › Connect to a custom MCP`. */
   const [mcpDetail, setMcpDetail] = createSignal<McpPanelDetail | null>(null);
   /** Set while a provider page is open, so the header reads `Providers › Codex`. */
@@ -386,7 +397,14 @@ export function ServerSettingsModal(props: ServerSettingsModalProps) {
   const crumbDetail = () => {
     if (section() === "mcp") return mcpDetail();
     if (section() === "import") return importDetail();
-    if (section() === "roles") return roles.crumb();
+    if (section() === "permissions") {
+      if (permissionsPage() === "roles") {
+        return roles.crumb() ?? { title: t("server.settings.rolesTitle"), back: backToPermissions };
+      }
+      if (permissionsPage() === "agent-groups") {
+        return groupCrumb() ?? { title: t("server.agentGroups.title"), back: backToPermissions };
+      }
+    }
     return section() === "providers" ? providerDetail() : null;
   };
   /** The key of the one action in flight, gating every panel at once rather than belonging to any. */
@@ -450,8 +468,23 @@ export function ServerSettingsModal(props: ServerSettingsModalProps) {
     if (!options || !actionsAvailable() || !serverCanAdminister(props.server, "host-personality-v1")) return undefined;
     return options;
   }
-  const availableInitialSection = (): Section | null =>
-    props.initialSection === "updates" && !props.hostUpdate ? null : (props.initialSection ?? null);
+  const availableInitialSection = (): ServerSettingsSection | null => {
+    const requested = props.initialSection;
+    if (requested === "updates" && !props.hostUpdate) return null;
+    if (requested === "permissions" && !roles.available() && !props.agentAccessPolicy) return null;
+    if (requested === "roles" && !roles.available()) return null;
+    if (requested === "agent-groups" && !props.agentAccessPolicy) return null;
+    return requested ?? null;
+  };
+  function openSection(requested: ServerSettingsSection) {
+    backToPermissions();
+    if (requested === "roles" || requested === "agent-groups") {
+      setPermissionsPage(requested);
+      setSection("permissions");
+    } else {
+      setSection(requested);
+    }
+  }
   const published = () => (local() ? props.hostStatus?.phase === "online" : props.server.state === "online");
 
   async function run(key: string, action: () => Promise<void>): Promise<boolean> {
@@ -490,7 +523,10 @@ export function ServerSettingsModal(props: ServerSettingsModalProps) {
     },
   };
   const general = createServerGeneralSection(host);
-  const roles = createServerRolesSection(host, () => section() === "roles" || section() === "members");
+  const roles = createServerRolesSection(
+    host,
+    () => (section() === "permissions" && permissionsPage() === "roles") || section() === "members",
+  );
   const audit = createServerAuditSection(host, () => section() === "audit");
 
   /** Whether this server and the caller support the section. */
@@ -503,8 +539,8 @@ export function ServerSettingsModal(props: ServerSettingsModalProps) {
         return Boolean(personalityOptions());
       case "vault":
         return Boolean(props.vault);
-      case "roles":
-        return roles.available();
+      case "permissions":
+        return roles.available() || Boolean(props.agentAccessPolicy);
       case "audit":
         return audit.available();
       case "desktop":
@@ -558,7 +594,7 @@ export function ServerSettingsModal(props: ServerSettingsModalProps) {
       handledOpenFirstRequest = request;
       const first = untrack(matchingSections)[0];
       if (!first) return;
-      setSection(first.value);
+      openSection(first.value);
       untrack(() => props.onFirstSectionOpened?.());
     },
   );
@@ -634,7 +670,7 @@ export function ServerSettingsModal(props: ServerSettingsModalProps) {
       if (!open) return;
       if (syncedServerId !== id) {
         syncedServerId = id;
-        setSection(untrack(availableInitialSection) ?? "general");
+        openSection(untrack(availableInitialSection) ?? "general");
         general.resetForServer();
         members.resetForServer();
         companySignIn.resetForServer();
@@ -645,11 +681,16 @@ export function ServerSettingsModal(props: ServerSettingsModalProps) {
     },
   );
 
-  /** Roles leaves with the access that gives it: a host that goes offline or a role that changes. */
   createEffect(
-    () => section() === "roles" && !roles.available(),
-    (gone) => {
-      if (gone) setSection("members");
+    () => ({
+      available: sectionSupported("permissions"),
+      pageAvailable: permissionsPage() === "roles" ? roles.available() : Boolean(props.agentAccessPolicy),
+      selected: section() === "permissions",
+    }),
+    ({ available, pageAvailable, selected }) => {
+      if (!selected) return;
+      if (!available) openSection("members");
+      else if (!pageAvailable) backToPermissions();
     },
   );
 
@@ -670,12 +711,10 @@ export function ServerSettingsModal(props: ServerSettingsModalProps) {
   );
 
   /** An opener that names a section of the same server moves to it; the effect above covers a new server. */
-  createEffect(
-    () => (props.open ? availableInitialSection() : null),
-    (requested) => {
-      if (requested) setSection(requested);
-    },
-  );
+  const requestedSection = createMemo(() => (props.open ? availableInitialSection() : null));
+  createEffect(requestedSection, (requested) => {
+    if (requested) openSection(requested);
+  });
 
   // A joined host can offer its scan after the section opens, when its capabilities arrive.
   createEffect(
@@ -708,7 +747,7 @@ export function ServerSettingsModal(props: ServerSettingsModalProps) {
         value === "personality" ||
         value === "vault" ||
         value === "members" ||
-        value === "roles" ||
+        value === "permissions" ||
         value === "audit" ||
         value === "desktop" ||
         value === "mcp" ||
@@ -721,7 +760,7 @@ export function ServerSettingsModal(props: ServerSettingsModalProps) {
         value === "routines" ||
         value === "browser-profiles"
       )
-        setSection(value);
+        openSection(value);
     },
   };
 
@@ -911,9 +950,41 @@ export function ServerSettingsModal(props: ServerSettingsModalProps) {
           <members.Panel />
           <companySignIn.Panel />
         </Tabs.Content>
-        <Show when={roles.available()}>
-          <Tabs.Content value="roles" class="settings-modal-tab-panel server-settings-panel" data-tab="roles">
-            <roles.Panel />
+        <Show when={sectionSupported("permissions")}>
+          <Tabs.Content
+            value="permissions"
+            class="settings-modal-tab-panel server-settings-panel"
+            data-tab="permissions"
+          >
+            <Show when={section() === "permissions"}>
+              <Show when={!permissionsPage()}>
+                <SettingsLinkGroup>
+                  <Show when={roles.available()}>
+                    <SettingsLinkRow
+                      icon={<ShieldCheck aria-hidden="true" />}
+                      label={t("server.settings.rolesTitle")}
+                      onClick={() => setPermissionsPage("roles")}
+                    />
+                  </Show>
+                  <Show when={props.agentAccessPolicy}>
+                    <SettingsLinkRow
+                      icon={<UsersRound aria-hidden="true" />}
+                      label={t("server.agentGroups.title")}
+                      onClick={() => setPermissionsPage("agent-groups")}
+                    />
+                  </Show>
+                </SettingsLinkGroup>
+              </Show>
+              <Show when={permissionsPage() === "roles" && roles.available()}>
+                <Text as="p" variant="caption" tone="muted">
+                  {t("server.settings.rolesDescription")}
+                </Text>
+                <roles.Panel />
+              </Show>
+              <Show when={permissionsPage() === "agent-groups" && props.agentAccessPolicy}>
+                {(calls) => <AgentGroupsPanel calls={calls()} onDetail={setGroupCrumb} />}
+              </Show>
+            </Show>
           </Tabs.Content>
         </Show>
         <Show when={audit.available()}>

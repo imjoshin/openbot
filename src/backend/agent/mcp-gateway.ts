@@ -1,3 +1,4 @@
+import type { AgentAccessPolicyConnection } from "@openbot/contracts/agent-access-policy";
 import type {
   McpServerConfig,
   McpSignInAppInput,
@@ -10,7 +11,12 @@ import type {
   SignOutMcpServerInput,
   TestMcpServerInput,
 } from "@openbot/contracts/ipc";
-import { GITHUB_CONNECTOR_MCP_SERVER_ID, mcpConfigErrors, normalizeMcpConfig } from "@openbot/contracts/ipc";
+import {
+  GITHUB_CONNECTOR_MCP_SERVER_ID,
+  GITHUB_CONNECTOR_MCP_SERVER_NAME,
+  mcpConfigErrors,
+  normalizeMcpConfig,
+} from "@openbot/contracts/ipc";
 import { withoutMcpAccountFragment } from "@openbot/contracts/mcp-accounts";
 import { sourceText } from "@openbot/i18n/source";
 import { type Logger, redactSecrets, toLogValue } from "@openbot/logging";
@@ -57,7 +63,7 @@ export interface TestMcpServerOptions {
 export interface McpGatewayHooks {
   emitError(code: string, error: unknown): void;
   /** Marks every agent's provider session for refresh. Read late: the threads are built after this. */
-  refreshAllAgentRuntimes(): Effect.Effect<void, McpGatewayFailed>;
+  refreshAllAgentRuntimes(connectionId?: string): Effect.Effect<void, McpGatewayFailed>;
 }
 
 /**
@@ -65,9 +71,11 @@ export interface McpGatewayHooks {
  * gateway sees the entry while the connection is active, and a fresh bearer at each hand-off.
  */
 export interface GitHubConnectorSource {
-  mcpServer(): McpServerConfig | null;
+  mcpServer(agentId?: string | null): McpServerConfig | null;
+  accountLabel?(): string | null;
+  mcpBindingId?(): string | null;
   /** The bearer for `mcpServer()`: the secret of the loopback GitHub MCP server, or the user token. */
-  mcpAuthorization(): Effect.Effect<string | null, McpGatewayFailed>;
+  mcpAuthorization(agentId?: string | null): Effect.Effect<string | null, McpGatewayFailed>;
 }
 
 export interface McpGatewayOptions {
@@ -78,6 +86,7 @@ export interface McpGatewayOptions {
   githubConnector?: GitHubConnectorSource | null;
   /** The agents, read when a server signed in through the proxy opens a session, for their names. */
   agents?: () => ReadonlyArray<{ id: string; name: string }>;
+  allows?: (agentId: string, connectionId: string) => boolean;
   /** The agent service logger, so a drop report keeps the `agent-service` prefix it always had. */
   logger: Logger;
   hooks: McpGatewayHooks;
@@ -123,6 +132,8 @@ export class McpGateway {
   readonly #proxy: McpOAuthProxy;
   readonly #logger: Logger;
   readonly #hooks: McpGatewayHooks;
+  readonly #agents: NonNullable<McpGatewayOptions["agents"]>;
+  readonly #allows: NonNullable<McpGatewayOptions["allows"]>;
 
   constructor(options: McpGatewayOptions) {
     const { credentials } = options;
@@ -133,11 +144,13 @@ export class McpGateway {
     this.#oauth = credentials.mcpOAuth ?? null;
     this.#logger = options.logger;
     this.#hooks = options.hooks;
+    this.#agents = options.agents ?? (() => []);
+    this.#allows = options.allows ?? (() => true);
     const oauth = this.#oauth;
     const agents = options.agents;
     this.#proxy = new McpOAuthProxy({
       settings: credentials.mcpOAuthProxySettings ?? null,
-      target: (route) => this.#proxyTarget(route),
+      target: (route, agentKey) => this.#proxyTarget(route, agentKey),
       refresh: (url, rejected) => (oauth ? oauth.refreshAccessToken(url, rejected) : Effect.succeed(null)),
       signInEnded: (url) => !oauth?.signedIn(url),
       ...(credentials.appVersion
@@ -171,25 +184,29 @@ export class McpGateway {
    * its own proxy. Every other row is handed as the user wrote it, with no bearer added. A proxy that
    * cannot start leaves the row out of the hand-off: the raw token is never the fallback.
    *
-   * A session of an agent gets a route of its own, so the proxy can name the agent to the server.
-   * Codex is given these routes too; its fingerprint does not change, so a resumed Codex session
-   * keeps the route without an agent until it is replaced.
+   * Each agent gets a route of its own. The proxy checks policy on every request, and legacy routes
+   * without an agent cannot reach the upstream server.
    */
   readonly endpoint = Effect.fnUntraced(function* (
     this: McpGateway,
     config: McpServerConfig,
     agentId: string | null = null,
   ): Effect.fn.Return<McpEndpoint | McpEndpointRefusal, McpGatewayFailed> {
+    if (agentId !== null && !this.#allows(agentId, config.id))
+      return { error: sourceText("error.agentAccessPolicy.connectionDenied") };
     if (config.id === GITHUB_CONNECTOR_MCP_SERVER_ID) {
       const github = this.#githubConnector;
-      const token = github ? yield* github.mcpAuthorization().pipe(toMcpGatewayFailed) : null;
+      const scoped = agentId !== null ? github?.mcpServer(agentId) : null;
+      if (!github || !scoped) return { error: sourceText("error.agentAccessPolicy.connectionDenied") };
+      const token = yield* github.mcpAuthorization(agentId).pipe(toMcpGatewayFailed);
       if (token) this.#handoff.recordSecret(token);
-      return { url: config.url, authorization: token, proxied: false };
+      return { url: scoped.url, authorization: token, proxied: false };
     }
     if (!this.#proxied(config))
       return { url: withoutMcpAccountFragment(config.url), authorization: null, proxied: false };
+    if (agentId === null) return { error: sourceText("error.agentAccessPolicy.connectionDenied") };
     const route = yield* this.#proxy
-      .route(mcpOAuthProxyRoute(config.id, config.url), agentId === null ? null : mcpOAuthProxyAgentKey(agentId))
+      .route(mcpOAuthProxyRoute(config.id, config.url), mcpOAuthProxyAgentKey(agentId))
       .pipe(Effect.result);
     if (Result.isFailure(route)) {
       this.#logger.warn("The MCP sign-in proxy did not start.", { cause: toLogValue(route.failure.cause) });
@@ -200,10 +217,8 @@ export class McpGateway {
   });
 
   /**
-   * What the Codex tool manifest records about the proxy for `configs`: the proxy address and the
-   * rows that go through it, or `null` when none does. Codex keeps the configuration of a resumed
-   * session, so a session that holds another port, or a row's own URL from before its sign-in, must
-   * be replaced. A computer with no proxied row keeps the fingerprints it had.
+   * The proxy binding and connection IDs in the Codex tool manifest. A binding survives a restart
+   * on the same address. A change in address or in the set of proxied connections replaces the session.
    */
   readonly proxyFingerprint = Effect.fnUntraced(function* (
     this: McpGateway,
@@ -213,17 +228,24 @@ export class McpGateway {
       .filter((config) => config.enabled && this.#proxied(config))
       .map((config) => config.id)
       .sort();
-    if (proxied.length === 0) return null;
-    const identity = yield* this.#proxy.identity().pipe(Effect.result);
+    const githubBinding = configs.some(({ id }) => id === GITHUB_CONNECTOR_MCP_SERVER_ID)
+      ? (this.#githubConnector?.mcpBindingId?.() ?? null)
+      : null;
+    if (proxied.length === 0) return githubBinding;
+    const identity = yield* this.#proxy.binding().pipe(Effect.result);
     // The hand-off leaves these rows out in this case, and the manifest records that.
     if (Result.isFailure(identity)) return JSON.stringify([null, proxied]);
-    return JSON.stringify([identity.success, proxied]);
+    return JSON.stringify(["agent-route-v1", identity.success, proxied, githubBinding]);
   });
 
   /** Stops the OAuth proxy. Called once, after every provider process has stopped. */
   readonly close = Effect.fnUntraced(function* (this: McpGateway) {
     yield* this.#proxy.close();
   });
+
+  invalidateAgentRoutes(agentId: string): void {
+    this.#proxy.revokeAgent(mcpOAuthProxyAgentKey(agentId));
+  }
 
   /**
    * Whether a row goes through the OAuth proxy: an http row with a sign-in on this computer, and no
@@ -245,15 +267,27 @@ export class McpGateway {
    * The upstream of one proxy route, read for each request: an enabled row that still goes through
    * the proxy, and its token now. A removed, turned-off, edited or signed-out row has no route.
    */
-  #proxyTarget(route: string): Effect.Effect<McpOAuthProxyTarget | null, McpOperationError> {
+  #proxyTarget(
+    route: string,
+    agentKey: string | null,
+  ): Effect.Effect<McpOAuthProxyTarget | "denied" | null, McpOperationError> {
     const oauth = this.#oauth;
+    const agent = agentKey === null ? null : this.#agents().find(({ id }) => mcpOAuthProxyAgentKey(id) === agentKey);
+    if (!agent) return Effect.succeed("denied");
     const config = this.#servers
       .listEnabled()
       .find((row) => this.#proxied(row) && mcpOAuthProxyRoute(row.id, row.url) === route);
-    if (!config || !oauth) return Effect.succeed(null);
+    if (!config || !oauth?.signedIn(config.url)) return Effect.succeed(null);
+    if (!this.#allows(agent.id, config.id)) return Effect.succeed("denied");
     return oauth.accessToken(config.url).pipe(
       // The row address with its account: a refresh after a refusal reads the sign-in of this row.
-      Effect.map((token) => (token ? { url: config.url, headers: config.headers, token } : null)),
+      Effect.map((token) =>
+        token && this.#allows(agent.id, config.id)
+          ? { url: config.url, headers: config.headers, token }
+          : token
+            ? "denied"
+            : null,
+      ),
     );
   }
 
@@ -276,12 +310,52 @@ export class McpGateway {
     return this.#servers.list();
   }
 
+  policyConnections(): AgentAccessPolicyConnection[] {
+    const configs = this.#servers.list();
+    const github = this.#githubConnector?.mcpServer();
+    return [
+      ...configs.map((config) => ({
+        id: config.id,
+        name: config.name,
+        accountLabel: null,
+        available: config.enabled && !this.needsOAuth(config),
+      })),
+      {
+        id: GITHUB_CONNECTOR_MCP_SERVER_ID,
+        name: GITHUB_CONNECTOR_MCP_SERVER_NAME,
+        accountLabel: this.#githubConnector?.accountLabel?.() ?? null,
+        available: Boolean(github && !configs.some(({ enabled, name }) => enabled && name === github.name)),
+      },
+    ];
+  }
+
+  /** A draft from an agent cannot reuse a host sign-in through a new or redirected row. */
+  agentDraftMayUseAddress(config: McpServerConfig): boolean {
+    if (config.transport !== "http" || !this.#oauth?.hasSignIn(config.url)) return true;
+    const saved = this.#servers.get(config.id);
+    return saved?.transport === "http" && mcpOAuthAccountKey(saved.url) === mcpOAuthAccountKey(config.url);
+  }
+
+  needsOAuth(config: McpServerConfig): boolean {
+    return this.#proxied(config) && this.#oauth?.signedIn(config.url) !== true;
+  }
+
+  readonly createForTransfer = Effect.fn("McpGateway.createForTransfer")(function* (
+    this: McpGateway,
+    config: McpServerConfig,
+  ) {
+    return yield* Effect.try({
+      try: () => this.#servers.save({ ...config, id: "", enabled: false }),
+      catch: (cause) => new McpGatewayFailed({ cause }),
+    });
+  }, Effect.uninterruptible);
+
   readonly save = Effect.fn("McpGateway.save")(function* (this: McpGateway, input: SaveMcpServerInput) {
-    yield* Effect.try({
+    const stored = yield* Effect.try({
       try: () => this.#servers.save(input.config),
       catch: (cause) => new McpGatewayFailed({ cause }),
     });
-    return yield* this.changed();
+    return yield* this.changed(input.config.id ? undefined : stored.id);
   }, Effect.uninterruptible);
 
   readonly remove = Effect.fn("McpGateway.remove")(function* (this: McpGateway, input: RemoveMcpServerInput) {
@@ -328,11 +402,11 @@ export class McpGateway {
    * removed server stays callable and an added one is invisible until the app restarts. The public
    * thread and its history are untouched - only the private provider session is replaced.
    */
-  readonly changed = Effect.fn("McpGateway.changed")(function* (this: McpGateway) {
+  readonly changed = Effect.fn("McpGateway.changed")(function* (this: McpGateway, connectionId?: string) {
     // A user who edits a server and does not fix it has to be told again. Without this the first
     // report of a run would be the only one, and an edit that changed nothing would look like a fix.
     this.#reportedDrops.clear();
-    yield* this.#hooks.refreshAllAgentRuntimes();
+    yield* this.#hooks.refreshAllAgentRuntimes(connectionId);
     return this.list();
   });
 
@@ -424,6 +498,13 @@ export class McpGateway {
     const errors = mcpConfigErrors(normalized);
     const firstError = errors.name ?? errors.command ?? errors.url;
     if (firstError) return yield* new McpGatewayFailed({ cause: new Error(firstError) });
+    if (this.needsOAuth(normalized))
+      return {
+        toolCount: 0,
+        tools: [],
+        error: sourceText("error.backend.mcpOAuthSignInNeeded"),
+        needs: "sign_in",
+      } satisfies McpProbeOutcome;
     const stored = this.#oauth;
     const silent: Pick<McpOAuthAuthority, "accessToken" | "signIn"> | undefined = stored
       ? { accessToken: (url) => stored.accessToken(url), signIn: () => null }

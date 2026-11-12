@@ -1,6 +1,7 @@
 import type { DatabaseSync } from "node:sqlite";
 import type { AgentSummary } from "@openbot/contracts/ipc";
 import { revokeRoutineWebhooks } from "../webhook-route-store";
+import { advanceAgentAccessPolicyRevision } from "./agent-access-policy-store";
 import { type DatabaseCore, deleteReceiptsOf } from "./database-core";
 import { databaseRow, databaseRows, requiredStringColumn } from "./database-rows";
 
@@ -238,6 +239,9 @@ export class AgentRoster {
         ).run(...sensitiveParameters);
         db.prepare(`DELETE FROM orchestration_events WHERE ${sensitiveFilter}`).run(...sensitiveParameters);
         db.prepare("DELETE FROM projection_agents WHERE agent_id = ?").run(agentId);
+        db.prepare("DELETE FROM agent_access_policy_memberships WHERE agent_id = ?").run(agentId);
+        db.prepare("DELETE FROM agent_access_policy_refreshes WHERE agent_id = ?").run(agentId);
+        advanceAgentAccessPolicyRevision(db);
         db.prepare("DELETE FROM projection_agent_memories WHERE agent_id = ?").run(agentId);
         revokeRoutineWebhooks(db, "agent", routineIds, { forget: true });
         db.prepare("DELETE FROM projection_agent_routines WHERE agent_id = ?").run(agentId);

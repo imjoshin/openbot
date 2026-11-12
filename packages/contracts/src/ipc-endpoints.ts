@@ -1,10 +1,23 @@
 import type {
+  AgentAccessPolicyApplyResult,
+  AgentAccessPolicyMutation,
+  AgentAccessPolicyPreview,
+  AgentAccessPolicySnapshot,
+} from "./agent-access-policy";
+import type {
+  AgentAccessPolicyTransferMapping,
+  AgentAccessPolicyTransferOptions,
+  AgentAccessPolicyTransferPreview,
+  AgentAccessPolicyTransferSelection,
+} from "./agent-access-policy-transfer";
+import type {
   AcpRegistryEntry,
   AcpRegistryInstallation,
   AcpRegistryInstallInput,
   AcpRegistryOperation,
 } from "./ipc-acp-registry";
 import type { AgentAccessChange, AgentAccessSnapshot } from "./ipc-agent-access";
+import type { CreateAgentWithAccessPolicyInput } from "./ipc-agent-access-policy";
 import type {
   AgentSessionSettings,
   ResetAgentSessionSettingInput,
@@ -716,6 +729,31 @@ function untypedRequest<Channel extends string>(channel: Channel): RequestEndpoi
 }
 
 export const IPC_ENDPOINTS = {
+  agentAccessPolicy: {
+    list: scopedQuery<AgentAccessPolicySnapshot, "required">()("agent-access-policy:list"),
+    preview: scopedRequest<AgentAccessPolicyMutation, AgentAccessPolicyPreview, "required">()(
+      "agent-access-policy:preview",
+    ),
+    apply: scopedRequest<AgentAccessPolicyMutation, AgentAccessPolicyApplyResult, "required">()(
+      "agent-access-policy:apply",
+    ),
+    createAgent: scopedRequest<CreateAgentWithAccessPolicyInput, ClientAgentSummary, "required">()(
+      "agent-access-policy:create-agent",
+    ),
+    getTransferMapping: scopedRequest<
+      AgentAccessPolicyTransferSelection,
+      AgentAccessPolicyTransferOptions | null,
+      "required"
+    >()("agent-access-policy:get-transfer-mapping"),
+    previewTransferMapping: scopedRequest<
+      AgentAccessPolicyTransferMapping,
+      AgentAccessPolicyTransferPreview,
+      "required"
+    >()("agent-access-policy:preview-transfer-mapping"),
+    applyTransferMapping: scopedRequest<AgentAccessPolicyTransferMapping, InstanceTransferResult, "required">()(
+      "agent-access-policy:apply-transfer-mapping",
+    ),
+  },
   app: {
     getAppInfo: request<undefined, AppInfo>()("app:get-info"),
     getSetupState: request<undefined, AppSetupState>()("app:get-setup-state"),
@@ -2292,6 +2330,7 @@ export type IpcEndpoints = typeof IPC_ENDPOINTS;
  * read this table; the preload and the preview mock are checked against it through the type.
  */
 export const IPC_GROUP_PATHS = {
+  agentAccessPolicy: "agentAccessPolicy",
   app: "",
   maintenance: "maintenance",
   providers: "",

@@ -347,6 +347,7 @@ export const messages = {
   "server.settings.browsingMemoryDescription":
     "エージェントのブラウザーを操作すると、使ったページとボタンからエージェントがサイトの使い方を学習します。入力したテキストは保存されません。",
   "server.settings.browsingMemoryLoadFailed": "閲覧の設定を読み込めませんでした。",
+  "server.settings.rolesTitle": "ロール",
   "server.settings.remoteOnline": "ホストはオンラインです。公開設定はオーナーが管理しています。",
   "server.settings.remoteOffline": "ホストはオフラインです。公開設定はオーナーが管理しています。",
   "server.settings.reachable": "オンラインでアクセスできます。招待されたユーザーのみがサインインできます。",

@@ -1,4 +1,5 @@
 import { messages as errorAgent } from "./error/agent";
+import { messages as errorAgentAccessPolicy } from "./error/agentAccessPolicy";
 import { messages as errorApp } from "./error/app";
 import { messages as errorAttachment } from "./error/attachment";
 import { messages as errorAuth } from "./error/auth";
@@ -40,6 +41,7 @@ export const source = {
   ...errorHost,
   ...errorRemote,
   ...errorAgent,
+  ...errorAgentAccessPolicy,
   ...errorProvider,
   ...errorComputerUse,
   ...errorVoice,

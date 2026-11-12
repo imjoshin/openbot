@@ -2,7 +2,7 @@
 // adds the OAuth token upstream, so a provider process holds a bearer for this address only, and
 // it renews a token that the server refuses during a session.
 
-import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { once } from "node:events";
 import { createServer, type Server as HttpServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { isDynamicRecord, isString } from "@openbot/contracts/runtime-values";
@@ -50,6 +50,7 @@ const FORWARDED_RESPONSE_HEADERS = ["content-type", "cache-control", "mcp-sessio
 export interface McpOAuthProxySettings {
   port: number | null;
   secret: string;
+  bindingId?: string;
 }
 
 export interface McpOAuthProxySettingsStore {
@@ -74,7 +75,10 @@ export interface McpOAuthProxyOptions {
    * or this machine holds no token for it. A removed, turned-off or signed-out server is refused
    * at once, with no list of routes to keep current.
    */
-  target: (route: string) => Effect.Effect<McpOAuthProxyTarget | null, McpOperationError>;
+  target: (
+    route: string,
+    agentKey: string | null,
+  ) => Effect.Effect<McpOAuthProxyTarget | "denied" | null, McpOperationError>;
   /** A new token after the server refused `rejected`, or `null`. See `McpOAuth.refreshAccessToken`. */
   refresh: (url: string, rejected: string) => Effect.Effect<string | null, McpOperationError>;
   /**
@@ -107,9 +111,8 @@ export interface McpOAuthProxyRoute {
  * Bytes go through unchanged, event streams included, because the provider and the server speak
  * MCP to each other. This class changes the credential, and it names OpenBot and the agent as the
  * client in the `clientInfo` of `initialize`. Each route has its own bearer, made
- * from the secret, so a bearer that one row's provider holds opens no other route. An agent route
- * adds the agent key to the path and to the bearer; the route without one stays valid for the
- * sessions that hold it.
+ * from the secret, so a bearer for one row opens no other route. An agent route adds the agent key
+ * to the path and to the bearer. The gateway requires a known agent and checks its current policy.
  *
  * **Never a 401.** A provider that gets a 401 starts its own OAuth sign-in against this address,
  * which has no metadata, and reports a broken server. A sign-in that is gone gets a JSON-RPC error
@@ -118,9 +121,11 @@ export interface McpOAuthProxyRoute {
 export class McpOAuthProxy {
   readonly #options: McpOAuthProxyOptions;
   readonly #starting = Semaphore.makeUnsafe(1);
+  readonly #agentRequests = new Map<string, Set<ServerResponse>>();
   #server: HttpServer | null = null;
   #port: number | null = null;
   #secret: string | null = null;
+  #bindingId: string | null = null;
 
   constructor(options: McpOAuthProxyOptions) {
     this.#options = options;
@@ -143,21 +148,22 @@ export class McpOAuthProxy {
     return { url: `http://127.0.0.1:${port}/mcp/${path}`, bearer };
   });
 
-  /**
-   * A digest of the port and the secret, or `null` before the listener is up. The Codex tool
-   * manifest records it: a session that holds the address of another port must be replaced, because
-   * Codex keeps the configuration of a resumed session.
-   */
-  readonly identity = Effect.fn("McpOAuthProxy.identity")(function* (this: McpOAuthProxy) {
-    const { port, secret } = yield* this.#start();
-    return createHash("sha256").update(`${port}\u0000${secret}`).digest("hex");
+  /** A stable ID of the listening address. An address change invalidates cached routes. */
+  readonly binding = Effect.fn("McpOAuthProxy.binding")(function* (this: McpOAuthProxy) {
+    const { bindingId } = yield* this.#start();
+    return bindingId;
   });
+
+  revokeAgent(agentKey: string): void {
+    for (const response of this.#agentRequests.get(agentKey) ?? []) response.destroy();
+  }
 
   readonly close = Effect.fn("McpOAuthProxy.close")(function* (this: McpOAuthProxy) {
     const server = this.#server;
     this.#server = null;
     this.#port = null;
     this.#secret = null;
+    this.#bindingId = null;
     if (!server) return;
     yield* Effect.callback<void>((resume) => {
       server.close(() => resume(Effect.void));
@@ -169,7 +175,8 @@ export class McpOAuthProxy {
   readonly #start = Effect.fn("McpOAuthProxy.start")(function* (this: McpOAuthProxy) {
     return yield* this.#starting.withPermit(
       Effect.gen({ self: this }, function* () {
-        if (this.#port !== null && this.#secret !== null) return { port: this.#port, secret: this.#secret };
+        if (this.#port !== null && this.#secret !== null && this.#bindingId !== null)
+          return { port: this.#port, secret: this.#secret, bindingId: this.#bindingId };
         const saved = yield* mcpSync(() => this.#options.settings?.read() ?? null);
         const server = yield* this.#listen(saved?.port ?? 0).pipe(
           Effect.catch((error) => (saved?.port == null ? Effect.fail(error) : this.#listen(0))),
@@ -186,11 +193,13 @@ export class McpOAuthProxy {
             ? saved.secret
             : randomBytes(32).toString("base64url");
         registerSecretValue(secret);
+        const bindingId = saved?.port === address.port && saved.bindingId ? saved.bindingId : randomUUID();
         this.#server = server;
         this.#port = address.port;
         this.#secret = secret;
-        if (this.#options.settings && (saved?.port !== address.port || saved.secret !== secret)) {
-          yield* this.#options.settings.write({ port: address.port, secret }).pipe(
+        this.#bindingId = bindingId;
+        if (this.#options.settings && saved?.bindingId !== bindingId) {
+          yield* this.#options.settings.write({ port: address.port, secret, bindingId }).pipe(
             Effect.catch((error) =>
               Effect.sync(() => {
                 logger.warn("The MCP sign-in proxy port could not be saved.", { cause: toLogValue(error.cause) });
@@ -198,7 +207,7 @@ export class McpOAuthProxy {
             ),
           );
         }
-        return { port: address.port, secret };
+        return { port: address.port, secret, bindingId };
       }),
     );
   });
@@ -251,6 +260,15 @@ export class McpOAuthProxy {
     const [, route, agentKey] = /^\/mcp\/([0-9a-f]{32})(?:\/([0-9a-f]{32}))?$/u.exec(request.url ?? "") ?? [];
     if (!route || !authorized(request, routeBearer(secret, agentKey ? `${route}/${agentKey}` : route)))
       return refuse(response, 403);
+    if (agentKey) {
+      const active = this.#agentRequests.get(agentKey) ?? new Set();
+      this.#agentRequests.set(agentKey, active);
+      active.add(response);
+      response.once("close", () => {
+        active.delete(response);
+        if (active.size === 0) this.#agentRequests.delete(agentKey);
+      });
+    }
     const method = request.method ?? "";
     if (method !== "POST" && method !== "GET" && method !== "DELETE") {
       response.writeHead(405, { allow: "POST, GET, DELETE" });
@@ -259,8 +277,10 @@ export class McpOAuthProxy {
     }
     const read = method === "POST" ? yield* readBody(request) : null;
     if (read === "too-large") return refuse(response, 413);
-    const target = yield* this.#options.target(route);
+    const target = yield* this.#options.target(route, agentKey ?? null);
     if (!target) return refuseRequests(response, method, read, sourceText("error.backend.mcpOAuthSignInNeeded"));
+    if (target === "denied")
+      return refuseRequests(response, method, read, sourceText("error.agentAccessPolicy.connectionDenied"));
     const client = this.#options.client;
     const body = read && client ? yield* mcpSync(() => withClientInfo(read, request, client, agentKey ?? null)) : read;
     const upstream = yield* this.#forward(target, request, method, body, controller);

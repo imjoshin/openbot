@@ -33,6 +33,7 @@ export function auditCategory(change: ServerAuditChange): Exclude<AuditFilter, "
     case "member-removed":
     case "member-role":
       return "members";
+    case "agent-access-policy":
     case "agent-level":
       return "agents";
     default:
@@ -96,6 +97,8 @@ export function auditLine(entry: ServerAuditEntry, t: MobileText["t"]): AuditPar
           ? t("mobile.server.audit.roleMemberAdded", parts)
           : t("mobile.server.audit.roleMemberRemoved", parts);
       }
+      case "agent-access-policy":
+        return t("mobile.server.audit.agentAccessPolicy");
       case "agent-level":
         return t("mobile.server.audit.agentLevel", {
           agent: show(name(change.agent)),

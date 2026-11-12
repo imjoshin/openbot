@@ -349,6 +349,22 @@ jobs:
         if: ${{ !cancelled() }}
         run: bun run test:mcp-member-access
 
+      - name: Check Agent Groups authorization and old clients
+        if: ${{ !cancelled() }}
+        run: bun scripts/agent-access-e2e.ts
+
+      - name: Check Agent Groups provider sessions and access
+        if: ${{ !cancelled() }}
+        run: bun scripts/agent-access-policy-e2e.ts
+
+      - name: Check scoped MCP sign-in routes
+        if: ${{ !cancelled() }}
+        run: bun scripts/mcp-oauth-e2e.ts
+
+      - name: Check transfers with Agent Groups permissions
+        if: ${{ !cancelled() }}
+        run: bun scripts/instance-transfer-everything-e2e.ts
+
       - name: Run the server mute and unmute E2E test
         if: ${{ !cancelled() }}
         run: bun run test:server-mute
@@ -700,6 +716,10 @@ jobs:
             .openbot-build/sign-in-relay-paste-e2e/
             .openbot-build/sign-in-relay-replay-e2e/
             .openbot-build/mcp-member-access-e2e/
+            .openbot-build/agent-access-e2e/
+            .openbot-build/agent-groups/host-validation/
+            .openbot-build/mcp-oauth-e2e/
+            .openbot-build/instance-transfer-everything-e2e/
             .openbot-build/server-mute-e2e/
             .openbot-build/desktop-notifications-e2e/
             .openbot-build/push-notification-away-e2e/

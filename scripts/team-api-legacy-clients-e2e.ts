@@ -9,6 +9,7 @@
 //   fixtures; the v7 decoder still refuses a provider that it does not know.
 // - v9: the v9 decoder reads the v9 fixtures, which have more than 128 capabilities; the v8 decoder
 //   refuses them.
+// - Agent Groups over WebRTC: a signed client uses the negotiated policy route and the host checks its role.
 // - v8 over WebRTC: a browser tab opened from an agent's panel keeps its owner agent, and a secure
 //   authentication answer and an agent profile save keep their agent (#3949).
 // - context-usage-v1: a v8 client that asks for it gets the context of each agent it can see; any other
@@ -24,9 +25,17 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import {
+  decodeAgentAccessPolicyTransferOptions,
+  decodeAgentAccessPolicyTransferPreview,
+} from "@openbot/contracts/agent-access-policy-transfer";
+import {
   type AgentContextState,
   type AgentModelOption,
   BROWSER_SECRET_RESPONSE_PATH,
+  decodeAgentAccessPolicyApplyResult,
+  decodeAgentAccessPolicyPreview,
+  decodeAgentAccessPolicySnapshot,
+  decodeRemoteInstanceTransferResult,
   LEGACY_AGENT_REASONING_EFFORTS,
 } from "@openbot/contracts/ipc";
 import {
@@ -61,7 +70,13 @@ import {
   teamCapabilitiesForProtocol,
   teamProtocolV2AuthenticationTranscript,
 } from "@openbot/contracts/team-protocol";
+import {
+  AGENT_ACCESS_POLICY_CAPABILITY,
+  AGENT_ACCESS_POLICY_CODECS,
+  AGENT_ACCESS_POLICY_ROUTES,
+} from "@openbot/contracts/team-protocol/agent-access-policy-v1";
 import { AGENT_NOTIFICATION_LEVELS_CAPABILITY } from "@openbot/contracts/team-protocol/agent-notification-levels-v1";
+import { INSTANCE_TRANSFER_ROUTES } from "@openbot/contracts/team-protocol/instance-transfer-v1";
 import {
   TEAM_REASONING_EFFORTS,
   TEAM_REASONING_EFFORTS_CAPABILITY,
@@ -127,6 +142,8 @@ plugin({
 });
 
 const { TeamApiServer } = await import("../src/main/team-api-server");
+const { InstanceTransferService } = await import("../src/main/instance-transfer-service");
+const { LocalSkillLibrary } = await import("../src/main/local-skill-library");
 const { TeamStore } = await import("../src/main/team-store");
 const { TeamWebRtcBridge } = await import("../src/main/team-webrtc-bridge");
 const { TeamWebRtcHostPeer } = await import("../src/main/team-webrtc-host-peer");
@@ -401,6 +418,28 @@ try {
       avatarHue: null,
     }),
   );
+  const library = new LocalSkillLibrary(join(userData, "local-skills"), () => agentStore.list());
+  const transfer = new InstanceTransferService({
+    agents,
+    skills: { library: () => library, installLocal: unused },
+    sharedRoot: agentStore.sharedRoot,
+    channelActor: () => ({ id: "local", name: "You" }),
+    appVersion: HOST_VERSION,
+    timezone: () => "UTC",
+    settings: {
+      mcpServers: () => [],
+      saveMcpServer: unused,
+      customProviders: () => [],
+      saveCustomProvider: unused,
+      customAgents: () => Effect.succeed([]),
+      providersOff: () => [],
+      sidebar: () => sidebar.getSnapshot(),
+      mutateSidebar: unused,
+      routineFlowLinks: () => Effect.succeed([]),
+      connectRoutineFlow: unused,
+      signedInProviders: () => [],
+    },
+  });
   server = new TeamApiServer({
     store: team,
     agents,
@@ -408,6 +447,8 @@ try {
     browser: teamBrowser,
     sidebarLayout: sidebar,
     agentAccess: access,
+    agentAccessPolicy: agents.agentAccessPolicy,
+    instanceTransfer: transfer,
     appVersion: HOST_VERSION,
   });
   const port = await Effect.runPromise(server.start());
@@ -929,7 +970,11 @@ try {
    * A released v2 client: Signal sent `connection`, then the client proves the ticket key.
    * `forged` signs another transcript; `request-first` sends an RPC before it authenticates.
    */
-  async function connectV2(peerId: string, opening: "valid" | "forged" | "request-first" = "valid") {
+  async function connectV2(
+    peerId: string,
+    opening: "valid" | "forged" | "request-first" = "valid",
+    role: "member" | "admin" = "member",
+  ) {
     const bridge = new LoopbackBridge();
     const ticket = `ticket-${randomUUID()}`;
     const sessionId = randomUUID();
@@ -941,7 +986,7 @@ try {
       membershipId: member.id,
       authEpoch: 1,
       sessionExpiresAt,
-      role: "member" as const,
+      role,
       clientPublicKey: clientKeys.publicKey,
     };
     const pathChanges: [sessionId: string, lost: boolean][] = [];
@@ -967,7 +1012,7 @@ try {
         sessionId,
         userId: claims.userId,
         membershipId: member.id,
-        role: "member",
+        role,
         sessionExpiresAt,
       }),
     );
@@ -1006,7 +1051,7 @@ try {
         signature: sign(null, Buffer.from(signed), clientKeys.privateKey).toString("base64url"),
       }),
     );
-    return { bridge, peer, ticket, sessionId, clientNonce, pathChanges };
+    return { bridge, peer, peerId, ticket, sessionId, clientNonce, pathChanges };
   }
 
   function authFrame(data: string) {
@@ -1032,50 +1077,51 @@ try {
     };
   }
 
-  const v2 = await step(
-    "v2 handshake: the host signs the transcript and confirms the session",
-    async () => {
-      const connection = await connectV2("peer-v2");
-      const ready = await connection.bridge.rpcFrom(0, (data) => {
-        const frame = authFrame(data);
-        return frame?.type === "auth-ready" ? frame : null;
-      });
-      assert.equal(ready.clientNonce, connection.clientNonce);
-      const hostTranscript = teamProtocolV2AuthenticationTranscript({
-        hostId: identity.serverId,
-        sessionId: connection.sessionId,
-        ticket: connection.ticket,
-        clientPublicKey: clientKeys.publicKey,
+  async function confirmV2(connection: Awaited<ReturnType<typeof connectV2>>) {
+    const ready = await connection.bridge.rpcFrom(0, (data) => {
+      const frame = authFrame(data);
+      return frame?.type === "auth-ready" ? frame : null;
+    });
+    assert.equal(ready.clientNonce, connection.clientNonce);
+    const hostTranscript = teamProtocolV2AuthenticationTranscript({
+      hostId: identity.serverId,
+      sessionId: connection.sessionId,
+      ticket: connection.ticket,
+      clientPublicKey: clientKeys.publicKey,
+      clientNonce: connection.clientNonce,
+      hostNonce: ready.hostNonce,
+      clientFingerprint: fingerprints.remoteFingerprint,
+      hostFingerprint: fingerprints.localFingerprint,
+    });
+    assert.ok(
+      verify(null, Buffer.from(hostTranscript), identity.publicKey, Buffer.from(ready.signature, "base64url")),
+      "The host signature does not verify with the host key that the client pinned.",
+    );
+    connection.bridge.emit(
+      "data",
+      connection.peerId,
+      "rpc",
+      encodeTeamProtocolV2Frame({
+        version: 2,
+        type: "auth-complete",
         clientNonce: connection.clientNonce,
         hostNonce: ready.hostNonce,
-        clientFingerprint: fingerprints.remoteFingerprint,
-        hostFingerprint: fingerprints.localFingerprint,
-      });
-      assert.ok(
-        verify(null, Buffer.from(hostTranscript), identity.publicKey, Buffer.from(ready.signature, "base64url")),
-        "The host signature does not verify with the host key that the client pinned.",
-      );
-      connection.bridge.emit(
-        "data",
-        "peer-v2",
-        "rpc",
-        encodeTeamProtocolV2Frame({
-          version: 2,
-          type: "auth-complete",
-          clientNonce: connection.clientNonce,
-          hostNonce: ready.hostNonce,
-        }),
-      );
-      await connection.bridge.rpcFrom(0, (data) => {
-        const frame = authFrame(data);
-        return frame?.type === "auth-confirmed" && frame.hostNonce === ready.hostNonce ? frame : null;
-      });
-      assert.ok(
-        team.listSessions().some((session) => session.id === connection.sessionId),
-        "The confirmed WebRTC session is not a team session.",
-      );
-      return connection;
-    },
+      }),
+    );
+    await connection.bridge.rpcFrom(0, (data) => {
+      const frame = authFrame(data);
+      return frame?.type === "auth-confirmed" && frame.hostNonce === ready.hostNonce ? frame : null;
+    });
+    assert.ok(
+      team.listSessions().some((session) => session.id === connection.sessionId),
+      "The confirmed WebRTC session is not a team session.",
+    );
+    return connection;
+  }
+
+  const v2 = await step(
+    "v2 handshake: the host signs the transcript and confirms the session",
+    async () => confirmV2(await connectV2("peer-v2")),
     ({ sessionId }) => ({ sessionId, confirmed: true }),
   );
 
@@ -1201,6 +1247,10 @@ try {
     const first = decodeTeamProtocolSupportV9(await compatibility(TEAM_BOOTSTRAP_CAPABILITIES));
     assert.equal(first.protocol.maximum, TEAM_PROTOCOL_V9);
     assert.ok(first.capabilities.includes(TEAM_LONG_CAPABILITY_LISTS_CAPABILITY), "The protocol 9 list has no marker.");
+    assert.ok(
+      first.capabilities.includes(AGENT_ACCESS_POLICY_CAPABILITY),
+      "The v9 host did not advertise Agent Groups.",
+    );
     // A protocol 9 request may carry more than 128 capabilities.
     const full = decodeTeamProtocolSupportV9(await compatibility(teamCapabilitiesForProtocol(TEAM_PROTOCOL_V9)));
     assert.deepEqual(full.capabilities, first.capabilities);
@@ -1208,11 +1258,226 @@ try {
     const v8 = decodeTeamProtocolSupportV8Base(await compatibility(teamCapabilitiesForProtocol(8)));
     assert.ok(v8.capabilities.length <= 128, `A protocol 8 peer got ${v8.capabilities.length} capabilities.`);
     assert.ok(!v8.capabilities.includes(TEAM_LONG_CAPABILITY_LISTS_CAPABILITY), "A protocol 8 peer got the marker.");
+    assert.ok(!v8.capabilities.includes(AGENT_ACCESS_POLICY_CAPABILITY), "A v8 peer got the Agent Groups capability.");
     assert.ok(
       !v8.capabilities.includes(AGENT_NOTIFICATION_LEVELS_CAPABILITY),
       "A protocol 8 peer got a protocol 9 capability.",
     );
     return { protocol9: first.capabilities.length, protocol8: v8.capabilities.length };
+  });
+
+  await step("Agent Groups over WebRTC: role, capability, stale and invalid changes, and import mapping", async () => {
+    const routes = AGENT_ACCESS_POLICY_ROUTES;
+    const full = teamCapabilitiesForProtocol(TEAM_PROTOCOL_V9);
+    const admin = await confirmV2(await connectV2("policy-admin", "valid", "admin"));
+    const call = async (
+      connection: Awaited<ReturnType<typeof connectV2>>,
+      path: string,
+      body: unknown,
+      capabilities = full,
+    ) => {
+      const requestId = randomUUID();
+      const from = connection.bridge.sent.length;
+      connection.bridge.emit(
+        "data",
+        connection.peerId,
+        "rpc",
+        encodeTeamProtocolV2Frame(
+          createTeamProtocolV2Request(requestId, "http.request", {
+            method: "POST",
+            path,
+            body,
+            capabilities: [...capabilities],
+          }),
+        ),
+      );
+      return connection.bridge.rpcFrom(from, rpcResponse(requestId));
+    };
+    const request = async (path: string, body: unknown) => {
+      const codec = AGENT_ACCESS_POLICY_CODECS.get(path);
+      assert.ok(codec);
+      const frame = await call(admin, path, codec.request(body));
+      assert.ok("result" in frame, `The ${path} request failed.`);
+      const result = record(frame.result, "policy result");
+      assert.equal(result.status, 200);
+      return codec.response(200, result.body);
+    };
+    const expectRefusal = async (
+      connection: Awaited<ReturnType<typeof connectV2>>,
+      path: string,
+      body: unknown,
+      status: number,
+      capabilities = full,
+    ) => {
+      const frame = await call(connection, path, body, capabilities);
+      assert.ok("error" in frame && frame.error, `The ${path} request succeeded.`);
+      assert.equal(frame.error.status, status, `${path} returned ${frame.error.code}: ${frame.error.message}`);
+      assert.equal(frame.error.retryable, false);
+      return frame.error;
+    };
+    await expectRefusal(v2, routes.list, {}, 403);
+    await expectRefusal(v2, routes.apply, { kind: "invalid" }, 403);
+    await expectRefusal(admin, routes.list, {}, 400, teamCapabilitiesForProtocol(8));
+    await expectRefusal(
+      admin,
+      routes.list,
+      {},
+      400,
+      full.filter((capability) => capability !== AGENT_ACCESS_POLICY_CAPABILITY),
+    );
+    const initial = decodeAgentAccessPolicySnapshot(await request(routes.list, {}));
+    assert.ok(initial.agents.some(({ id }) => id === source.id));
+    const mutation = {
+      kind: "savePolicy",
+      expectedRevision: initial.revision,
+      policyId: null,
+      name: "Research connections",
+      allowNewConnections: false,
+      choices: {},
+      assignments: [{ agentId: source.id, assigned: true, keepOverrides: false }],
+    };
+    const preview = decodeAgentAccessPolicyPreview(await request(routes.preview, mutation));
+    assert.equal(preview.revision, initial.revision);
+    const saved = decodeAgentAccessPolicyApplyResult(await request(routes.apply, mutation));
+    const assignment = saved.snapshot.agents.find(({ id }) => id === source.id)?.policyId;
+    assert.ok(assignment && saved.snapshot.policies.some(({ id }) => id === assignment));
+    await expectRefusal(admin, routes.apply, mutation, 409);
+    const create = {
+      agent: { name: "Grouped fixture", description: "", avatarSeed: "grouped", avatarHue: null, initialMessage: "Hi" },
+      policyId: assignment,
+      expectedRevision: initial.revision,
+    };
+    await expectRefusal(v2, routes.createAgent, create, 403);
+    await expectRefusal(admin, routes.createAgent, create, 409);
+    await expectRefusal(
+      admin,
+      routes.createAgent,
+      { ...create, expectedRevision: saved.snapshot.revision, policyId: "missing-policy" },
+      400,
+    );
+    const malformedReplies = [];
+    for (const malformed of [
+      { ...mutation, expectedRevision: -1 },
+      { ...mutation, choices: Object.fromEntries([["__proto__", true]]) },
+      { ...mutation, choices: { "test-connection": "false" } },
+      { ...mutation, name: "x".repeat(81) },
+    ]) {
+      const frame = await call(admin, routes.apply, malformed);
+      assert.ok("error" in frame && frame.error, "A malformed policy request succeeded.");
+      const { code, status, retryable } = frame.error;
+      malformedReplies.push({ code, status, retryable });
+    }
+    assert.deepEqual(decodeAgentAccessPolicySnapshot(await request(routes.list, {})), saved.snapshot);
+
+    const hiddenTargetReplies = [];
+    const visibleAgents = hostAgents.listAgents.bind(hostAgents);
+    hostAgents.listAgents = () =>
+      visibleAgents().map((agent) => (agent.id === source.id ? { ...agent, model: "x".repeat(161) } : agent));
+    try {
+      const filtered = decodeAgentAccessPolicySnapshot(await request(routes.list, {}));
+      assert.ok(
+        filtered.agents.every(({ id }) => id !== source.id),
+        "A hidden agent is visible in policy settings.",
+      );
+      const hidden = await expectRefusal(
+        admin,
+        routes.preview,
+        { kind: "resetOverrides", expectedRevision: filtered.revision, agentId: source.id },
+        404,
+      );
+      assert.equal(hidden.message, sourceText("error.team.agentNotFound"));
+      const absent = await call(admin, routes.preview, {
+        kind: "resetOverrides",
+        expectedRevision: filtered.revision,
+        agentId: "absent-agent",
+      });
+      assert.ok("error" in absent && absent.error);
+      hiddenTargetReplies.push({
+        sameAsHidden: JSON.stringify(absent.error) === JSON.stringify(hidden),
+        status: absent.error.status,
+      });
+      for (const agentId of [source.id, "absent-agent"]) {
+        const refusedAssignment = await call(admin, routes.apply, {
+          ...mutation,
+          expectedRevision: filtered.revision,
+          policyId: assignment,
+          assignments: [{ agentId, assigned: true, keepOverrides: false }],
+        });
+        assert.ok("error" in refusedAssignment && refusedAssignment.error);
+        hiddenTargetReplies.push({
+          sameAsHidden: JSON.stringify(refusedAssignment.error) === JSON.stringify(hidden),
+          status: refusedAssignment.error.status,
+        });
+      }
+      const deletion = decodeAgentAccessPolicyPreview(
+        await request(routes.preview, {
+          kind: "deletePolicy",
+          expectedRevision: filtered.revision,
+          policyId: assignment,
+          destinationPolicyId: null,
+        }),
+      );
+      assert.deepEqual(deletion.changes, []);
+      assert.equal(deletion.overridesRemoved, 0);
+      assert.equal(deletion.overridesRetained, 0);
+    } finally {
+      hostAgents.listAgents = visibleAgents;
+    }
+
+    const path = join(root, "restricted.zip");
+    await runCauseEffect(
+      transfer.exportTo(path, { agentIds: [source.id], includeSettings: false, includeFiles: false }),
+    );
+    const owned = await runCauseEffect(transfer.stage(path, member.id));
+    const foreign = await runCauseEffect(transfer.stage(path, "different-admin"));
+    const keys = owned.agents.map(({ key }) => key);
+    assert.equal(keys.length, 1);
+    const selection = { token: owned.token, keys };
+    await expectRefusal(v2, routes.getTransferMapping, selection, 403);
+    const closed = await expectRefusal(admin, routes.getTransferMapping, { ...selection, token: foreign.token }, 409);
+    assert.equal(closed.message, sourceText("error.import.exportClosed"));
+    await expectRefusal(
+      admin,
+      INSTANCE_TRANSFER_ROUTES.apply,
+      { ...selection, includeSettings: false, timezone: "UTC" },
+      409,
+    );
+    const options = decodeAgentAccessPolicyTransferOptions(await request(routes.getTransferMapping, selection));
+    assert.ok(options);
+    const mapping = {
+      ...selection,
+      expectedRevision: options.revision,
+      agentMappings: options.agents.map(({ key }) => ({ key, policyId: assignment })),
+      connectionMappings: options.sourceConnections.map(({ id }) => ({ sourceId: id, destinationId: id })),
+    };
+    await expectRefusal(admin, routes.applyTransferMapping, mapping, 409);
+    const reviewed = decodeAgentAccessPolicyTransferPreview(await request(routes.previewTransferMapping, mapping));
+    assert.equal(reviewed.agents[0]?.policyId, assignment);
+    const changed = { ...mapping, agentMappings: mapping.agentMappings.map(({ key }) => ({ key, policyId: null })) };
+    const unreviewed = await expectRefusal(admin, routes.applyTransferMapping, changed, 409);
+    assert.equal(unreviewed.message, sourceText("error.import.transferAgentAccessReviewRequired"));
+    const applied = await Promise.all([
+      call(admin, routes.applyTransferMapping, mapping),
+      call(admin, routes.applyTransferMapping, mapping),
+    ]);
+    const imported = applied.find((frame) => "result" in frame);
+    const reused = applied.find((frame) => "error" in frame);
+    assert.equal(reused?.error?.status, 409);
+    assert.ok(imported && "result" in imported);
+    assert.equal(record(imported.result, "import result").status, 200);
+    const result = decodeRemoteInstanceTransferResult(record(imported.result, "import result").body);
+    assert.equal(result.agents.length, 1);
+    assert.deepEqual(result.skipped, []);
+    const after = decodeAgentAccessPolicySnapshot(await request(routes.list, {}));
+    assert.equal(after.agents.find(({ id }) => id === result.agents[0]?.agentId)?.policyId, assignment);
+    assert.deepEqual(
+      { malformedReplies, hiddenTargetReplies },
+      {
+        malformedReplies: Array.from({ length: 4 }, () => ({ code: "protocol_error", status: 400, retryable: false })),
+        hiddenTargetReplies: Array.from({ length: 3 }, () => ({ sameAsHidden: true, status: 404 })),
+      },
+    );
+    return { role: 403, capability: 400, saved: saved.status, stale: 409, malformed: 4, hidden: 404, imported: 1 };
   });
 
   await step("v8 RPC: a secure authentication answer over WebRTC reaches the agent (#3949)", async () => {
@@ -1367,7 +1632,9 @@ try {
   database.close();
   mkdirSync(OUT, { recursive: true });
   writeFileSync(join(OUT, "report.json"), `${JSON.stringify(report, null, 2)}\n`);
-  await rm(root, { recursive: true, force: true });
+  await rm(root, { recursive: true, force: true, maxRetries: 4, retryDelay: 50 }).catch(() => {
+    process.stderr.write("The temporary Team API profile is still in use.\n");
+  });
 }
 
 process.stdout.write(`Team API v1-v3, v7, v8 and v9 clients passed. Report: ${join(OUT, "report.json")}\n`);

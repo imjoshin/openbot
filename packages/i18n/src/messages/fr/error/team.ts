@@ -203,4 +203,6 @@ export const messages = {
   "error.team.providerUseUnsupported":
     "Cette connexion ne prend pas en charge l’activation et la désactivation des fournisseurs.",
   "error.team.providerUseInvalid": "Ce fournisseur n’a pas d’interrupteur d’activation.",
+  "error.team.agentAccessPolicyUnsupported": "Ce serveur ne prend pas en charge les groupes d’agents.",
+  "error.team.agentAccessPolicyInvalid": "La demande de groupes d’agents est invalide.",
 } as const satisfies PartialTranslation<typeof source>;

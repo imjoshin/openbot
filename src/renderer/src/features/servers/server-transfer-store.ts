@@ -4,6 +4,7 @@ import type {
   InstanceTransferSummary,
   OpenBotDesktopApi,
 } from "@openbot/contracts/ipc";
+import { sourceText } from "@openbot/i18n/source";
 import { toast } from "@openbot/ui";
 import type {
   InstanceExportOptions,
@@ -12,7 +13,7 @@ import type {
   InstanceTransferScreen,
 } from "@openbot/ui/features/transfer/InstanceTransferView";
 import { currentText } from "@openbot/ui/text";
-import { createEffect, createStore } from "solid-js";
+import { createEffect, createStore, onCleanup, snapshot } from "solid-js";
 import { desktopAnalytics } from "../../analytics";
 
 /**
@@ -21,6 +22,24 @@ import { desktopAnalytics } from "../../analytics";
  */
 export type ServerTransferCalls = Omit<OpenBotDesktopApi["instanceTransfer"], "showExport"> &
   Partial<Pick<OpenBotDesktopApi["instanceTransfer"], "showExport">>;
+
+export interface ServerTransferMappingCalls {
+  getTransferMapping(
+    input: AgentAccessPolicyTransferSelection,
+    serverId: string,
+  ): Promise<AgentAccessPolicyTransferOptions | null>;
+  previewTransferMapping(
+    input: AgentAccessPolicyTransferMapping,
+    serverId: string,
+  ): Promise<AgentAccessPolicyTransferPreview>;
+  applyTransferMapping(input: AgentAccessPolicyTransferMapping, serverId: string): Promise<InstanceTransferResult>;
+}
+
+interface TransferMappingState {
+  selection: AgentAccessPolicyTransferSelection;
+  options: AgentAccessPolicyTransferOptions;
+  review?: { input: AgentAccessPolicyTransferMapping; preview: AgentAccessPolicyTransferPreview };
+}
 
 interface ServerTransferState {
   screen: InstanceTransferScreen;
@@ -33,6 +52,7 @@ interface ServerTransferState {
   preview: InstanceTransferPreview | null;
   result: InstanceTransferResult | null;
   importError: string | null;
+  mapping: TransferMappingState | null;
 }
 
 const INITIAL: ServerTransferState = {
@@ -46,11 +66,20 @@ const INITIAL: ServerTransferState = {
   preview: null,
   result: null,
   importError: null,
+  mapping: null,
 };
 
 /** The Transfer section's view of one export and one import of one server. */
-export function createServerTransferStore(serverId: string, calls: ServerTransferCalls) {
+export function createServerTransferStore(
+  serverId: string,
+  calls: ServerTransferCalls,
+  mappingCalls: () => ServerTransferMappingCalls | undefined,
+) {
   const [state, setState] = createStore<ServerTransferState>({ ...INITIAL });
+  let importGeneration = 0;
+  onCleanup(() => {
+    importGeneration += 1;
+  });
 
   // The agents are read again each time the export screen opens.
   createEffect(
@@ -150,44 +179,169 @@ export function createServerTransferStore(serverId: string, calls: ServerTransfe
       );
   }
 
-  function importFile(keys: string[], includeSettings: boolean): void {
+  async function importFile(keys: string[], includeSettings: boolean): Promise<void> {
     const token = state.preview?.token;
-    if (!token) return;
+    if (!token || state.importPhase === "importing") return;
+    const generation = ++importGeneration;
     setState((draft) => {
       draft.importPhase = "importing";
       draft.importError = null;
     });
-    void calls
-      .apply({ token, keys, includeSettings }, serverId)
-      .then((result) => {
-        desktopAnalytics.track("server_transfer_action", { action: "import", result: "succeeded" });
-        setState((draft) => {
-          draft.importPhase = "done";
-          draft.preview = null;
-          draft.result = result;
-        });
-      })
-      .catch((error: unknown) => {
-        desktopAnalytics.track("server_transfer_action", {
-          action: "import",
-          result: "failed",
-          failure_code: "import_failed",
-        });
-        setState((draft) => {
-          // The token is spent once main starts, so the file must be chosen again.
-          draft.importPhase = "idle";
-          draft.preview = null;
-          draft.importError = message(error, "settings.transfer.import.failed");
-        });
+    const mappingApi = mappingCalls();
+    if (!includeSettings && mappingApi && keys.length > 0) {
+      const selection = { token, keys };
+      try {
+        const options = await mappingApi.getTransferMapping(selection, serverId);
+        if (generation !== importGeneration) return;
+        if (options) {
+          setState((draft) => {
+            draft.mapping = { selection, options };
+            draft.importPhase = "review";
+          });
+          return;
+        }
+      } catch (error) {
+        if (generation !== importGeneration) return;
+        showMappingError(error);
+        return;
+      }
+    }
+    await applyImport(() => calls.apply({ token, keys, includeSettings }, serverId), generation);
+  }
+
+  function showMappingError(error: unknown) {
+    setState((draft) => {
+      draft.importPhase = "review";
+      draft.importError = message(error, "settings.transfer.import.failed");
+    });
+  }
+
+  async function refreshMapping(
+    api: ServerTransferMappingCalls,
+    selection: AgentAccessPolicyTransferSelection,
+    generation: number,
+    error: unknown,
+  ) {
+    setState((draft) => {
+      if (draft.mapping) delete draft.mapping.review;
+    });
+    try {
+      const options = await api.getTransferMapping(selection, serverId);
+      if (generation !== importGeneration) return;
+      setState((draft) => {
+        draft.mapping = options ? { selection, options } : null;
       });
+      showMappingError(error);
+    } catch (readError) {
+      if (generation !== importGeneration) return;
+      showMappingError(readError);
+    }
+  }
+
+  function stale(error: unknown) {
+    return error instanceof Error && error.message.includes(sourceText("error.agentAccessPolicy.stale"));
+  }
+
+  async function previewMapping(input: AgentAccessPolicyTransferMapping): Promise<void> {
+    const api = mappingCalls();
+    const mapping = state.mapping;
+    if (!api || !mapping || state.importPhase === "importing") return;
+    const selection = snapshot(mapping.selection);
+    const generation = ++importGeneration;
+    setState((draft) => {
+      draft.importPhase = "importing";
+      draft.importError = null;
+    });
+    try {
+      const mutation = snapshot(input);
+      const preview = await api.previewTransferMapping(mutation, serverId);
+      if (generation !== importGeneration) return;
+      setState((draft) => {
+        if (draft.mapping) draft.mapping.review = { input: mutation, preview };
+        draft.importPhase = "review";
+      });
+    } catch (error) {
+      if (generation !== importGeneration) return;
+      if (stale(error)) await refreshMapping(api, selection, generation, error);
+      else showMappingError(error);
+    }
+  }
+
+  async function applyMapping(): Promise<void> {
+    const api = mappingCalls();
+    const mapping = state.mapping;
+    if (!api || !mapping?.review || state.importPhase === "importing") return;
+    const selection = snapshot(mapping.selection);
+    const input = snapshot(mapping.review.input);
+    const generation = ++importGeneration;
+    setState((draft) => {
+      draft.importPhase = "importing";
+      draft.importError = null;
+    });
+    await applyImport(
+      () => api.applyTransferMapping(input, serverId),
+      generation,
+      (error) => refreshMapping(api, selection, generation, error),
+    );
+  }
+
+  async function applyImport(
+    run: () => Promise<InstanceTransferResult>,
+    generation: number,
+    onStale?: (error: unknown) => Promise<void>,
+  ): Promise<void> {
+    try {
+      const result = await run();
+      if (generation !== importGeneration) return;
+      desktopAnalytics.track("server_transfer_action", { action: "import", result: "succeeded" });
+      setState((draft) => {
+        draft.importPhase = "done";
+        draft.mapping = null;
+        draft.preview = null;
+        draft.result = result;
+      });
+    } catch (error) {
+      if (generation !== importGeneration) return;
+      if (onStale && stale(error)) {
+        await onStale(error);
+        return;
+      }
+      desktopAnalytics.track("server_transfer_action", {
+        action: "import",
+        result: "failed",
+        failure_code: "import_failed",
+      });
+      setState((draft) => {
+        draft.importPhase = "idle";
+        draft.mapping = null;
+        draft.preview = null;
+        draft.importError = message(error, "settings.transfer.import.failed");
+      });
+    }
+  }
+
+  function editMapping(): void {
+    setState((draft) => {
+      if (draft.mapping) delete draft.mapping.review;
+      draft.importError = null;
+    });
+  }
+
+  function closeMapping(): void {
+    setState((draft) => {
+      draft.mapping = null;
+      draft.importError = null;
+    });
   }
 
   function cancelImport(): void {
+    importGeneration += 1;
     const token = state.preview?.token;
     if (token) void calls.discard(token, serverId).catch(report);
     setState((draft) => {
       draft.importPhase = "idle";
       draft.preview = null;
+      draft.mapping = null;
       draft.importError = null;
     });
   }
@@ -200,7 +354,21 @@ export function createServerTransferStore(serverId: string, calls: ServerTransfe
     });
   }
 
-  return { state, setScreen, exportFile, showExport, exportAgain, choose, importFile, cancelImport, importDone };
+  return {
+    state,
+    setScreen,
+    exportFile,
+    showExport,
+    exportAgain,
+    choose,
+    importFile,
+    previewMapping,
+    applyMapping,
+    editMapping,
+    closeMapping,
+    cancelImport,
+    importDone,
+  };
 }
 
 function message(
@@ -220,3 +388,10 @@ function report(error: unknown): void {
     report: { operation: "settings", source: "system", cause_code: "unknown" },
   });
 }
+
+import type {
+  AgentAccessPolicyTransferMapping,
+  AgentAccessPolicyTransferOptions,
+  AgentAccessPolicyTransferPreview,
+  AgentAccessPolicyTransferSelection,
+} from "@openbot/contracts/agent-access-policy-transfer";

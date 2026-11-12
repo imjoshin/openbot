@@ -397,7 +397,15 @@ export interface TeamApiHermesImport extends Pick<HermesImportService, "apply" |
  */
 export type TeamApiInstanceTransfer = Pick<
   InstanceTransferService,
-  "summary" | "exportForMember" | "stageUpload" | "apply" | "discard" | "chunks"
+  | "summary"
+  | "exportForMember"
+  | "stageUpload"
+  | "apply"
+  | "discard"
+  | "chunks"
+  | "getTransferMapping"
+  | "previewTransferMapping"
+  | "applyTransferMapping"
 >;
 
 /**
@@ -689,7 +697,8 @@ export type TeamApiLiveVoice = Pick<AgentService, "startLiveVoice" | "stopLiveVo
 };
 
 export type TeamApiAgentAccess = Pick<AgentAccessStore, "copyAgent" | "get" | "levels" | "set" | "subscribe">;
-export type TeamApiServerAudit = Pick<ServerAuditStore, "read">;
+export type TeamApiServerAudit = Pick<ServerAuditStore, "read"> & Partial<Pick<ServerAuditStore, "record">>;
+export type TeamApiAgentAccessPolicy = Pick<AgentService["agentAccessPolicy"], "read" | "preview" | "apply">;
 
 export interface TeamApiOptions {
   /** `events-v1`: admin-only event source and routine management. */
@@ -726,6 +735,7 @@ export interface TeamApiOptions {
   sidebarPins?: TeamApiSidebarPins;
   /** `agent-access-v1`: the roles that limit what a member can do with each agent. */
   agentAccess?: TeamApiAgentAccess;
+  agentAccessPolicy?: TeamApiAgentAccessPolicy;
   /** `server-audit-v1`: the changes to members, roles and agent access, for owners and admins. */
   serverAudit?: TeamApiServerAudit;
   agentTasks?: TeamApiAgentTasks;

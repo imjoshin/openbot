@@ -1,3 +1,4 @@
+import { AGENT_ACCESS_POLICY_CAPABILITY } from "@openbot/contracts/team-protocol/agent-access-policy-v1";
 import { TEAM_AGENT_CREATE_MODEL_CAPABILITY } from "@openbot/contracts/team-protocol/current";
 import { PROVIDER_ACCOUNTS_CAPABILITY } from "@openbot/contracts/team-protocol/provider-accounts-v1";
 import { FIRST_AGENT_SUGGESTIONS, FirstAgentSetup } from "@openbot/ui/features/agents/FirstAgentSetup";
@@ -6,6 +7,7 @@ import { useProviders } from "../../providers";
 import { useAuth } from "../account/account-context";
 import { useCustomAgents } from "../custom-agents/custom-agents-context";
 import { useSetup } from "../onboarding/onboarding-context";
+import { desktopAgentAccessPolicyCalls } from "../servers/agent-access-policy-port";
 import { serverCanAdminister } from "../servers/server-capabilities";
 import { useServerSettings } from "../servers/server-settings";
 import { useServers } from "../servers/servers-context";
@@ -53,6 +55,13 @@ export function WorkspaceAgentSetup() {
    * `provider-accounts-v1` after the create, so an owner or admin of a joined server with that
    * capability can choose it too. The host gives its accounts only to them.
    */
+  const agentAccessPolicy = createMemo(() => {
+    const host = activeServer();
+    return serverCanAdminister(host, AGENT_ACCESS_POLICY_CAPABILITY) &&
+      (host.kind === "local" || host.state === "online")
+      ? desktopAgentAccessPolicyCalls(host.id)
+      : undefined;
+  });
   const accountChoice = createMemo(() => serverCanAdminister(activeServer(), PROVIDER_ACCOUNTS_CAPABILITY));
   /** Provider downloads are the local machine's business, never a remote host's. */
   const localProviderDownloads = createMemo(
@@ -109,6 +118,7 @@ export function WorkspaceAgentSetup() {
 
   return (
     <FirstAgentSetup
+      agentAccessPolicy={agentAccessPolicy()}
       value={agentSetupDraft()}
       suggestions={FIRST_AGENT_SUGGESTIONS}
       mode={agentList().length === 0 ? "first" : "additional"}

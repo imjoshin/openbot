@@ -1,0 +1,12 @@
+{
+  "revision": 5,
+  "agents": [
+    {
+      "key": "agent-one",
+      "policyId": "destination-work",
+      "allowNewConnections": false,
+      "enabledConnectionIds": ["destination-work-mcp"],
+      "disabledConnectionIds": ["destination-personal-mcp", "unmapped-mcp"]
+    }
+  ]
+}

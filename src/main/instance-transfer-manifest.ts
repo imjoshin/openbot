@@ -9,6 +9,7 @@
 import { isAgentProvider } from "@openbot/contracts/agent-providers";
 import { INPUT_LIMITS } from "@openbot/contracts/input-limits";
 import {
+  GITHUB_CONNECTOR_MCP_SERVER_ID,
   isAgentImportKey,
   isAgentTaskLimit,
   isAvatarHue,
@@ -20,14 +21,21 @@ import {
   ROUTINE_MISSED_POLICIES,
   ROUTINE_RUN_PLACES,
 } from "@openbot/contracts/ipc";
+import { isDynamicRecord } from "@openbot/contracts/runtime-values";
 import { sourceText } from "@openbot/i18n/source";
 import { Result, Schema } from "effect";
+import {
+  TransferAgentAccess,
+  type TransferAgentAccessData,
+  validTransferAgentAccess,
+} from "./instance-transfer-agent-access";
 import { TRANSFER_WORKFLOWS } from "./instance-transfer-workflows";
 import { isUnsafeArchivePath } from "./skill-package";
 
 export const INSTANCE_TRANSFER_MANIFEST = "openbot-transfer.json";
 export const INSTANCE_TRANSFER_FORMAT = "openbot-instance-transfer";
 export const INSTANCE_TRANSFER_VERSION = 1;
+export const INSTANCE_TRANSFER_ACCESS_POLICY_VERSION = 2;
 /** Where the files of `~/OpenBot/Shared` are in the archive. */
 export const SHARED_FOLDER = "shared";
 /** The most channels a file carries. An export with more keeps the first ones and says so. */
@@ -225,6 +233,7 @@ const Manifest = Schema.Struct({
   channels: Schema.optionalKey(Schema.Array(Schema.Unknown).check(Schema.isMaxLength(TRANSFER_CHANNELS))),
   /** Added with the channels: the channel member id of the person who exported, for their own messages. */
   exporter: Schema.optionalKey(text(128)),
+  accessPolicy: Schema.optionalKey(TransferAgentAccess),
 });
 
 export type TransferAgent = typeof Agent.Type;
@@ -240,12 +249,13 @@ export interface TransferManifest {
   signedIn: readonly (typeof Provider.Type)[];
   channels: TransferChannel[];
   exporter: string | null;
+  accessPolicy: TransferAgentAccessData | null;
 }
 
 /** What the export writes. The same shape that `decodeTransferManifest` reads. */
 export interface TransferManifestFile {
   format: typeof INSTANCE_TRANSFER_FORMAT;
-  version: typeof INSTANCE_TRANSFER_VERSION;
+  version: typeof INSTANCE_TRANSFER_VERSION | typeof INSTANCE_TRANSFER_ACCESS_POLICY_VERSION;
   source: { appVersion: string; exportedAt: string };
   agents: TransferAgent[];
   settings: TransferSettings | null;
@@ -253,6 +263,7 @@ export interface TransferManifestFile {
   signedIn: (typeof Provider.Type)[];
   channels?: TransferChannel[];
   exporter?: string;
+  accessPolicy?: TransferAgentAccessData;
 }
 
 const decodeManifest = Schema.decodeUnknownResult(Manifest);
@@ -270,12 +281,22 @@ export function decodeTransferManifest(bytes: Uint8Array): { manifest: TransferM
   const decoded = decodeManifest(value);
   if (Result.isFailure(decoded)) throw new Error(sourceText("error.import.transferNotFile"));
   const file = decoded.success;
-  if (file.version !== INSTANCE_TRANSFER_VERSION) throw new Error(sourceText("error.import.transferNewer"));
+  if (file.version !== INSTANCE_TRANSFER_VERSION && file.version !== INSTANCE_TRANSFER_ACCESS_POLICY_VERSION)
+    throw new Error(sourceText("error.import.transferNewer"));
+  if ((file.version === INSTANCE_TRANSFER_ACCESS_POLICY_VERSION) !== (file.accessPolicy !== undefined))
+    throw new Error(sourceText("error.import.transferNotFile"));
 
   const warnings: string[] = [];
   const keys = new Set<string>();
   const agents: TransferAgent[] = [];
   for (const [index, item] of file.agents.entries()) {
+    if (
+      file.version === INSTANCE_TRANSFER_VERSION &&
+      isDynamicRecord(item) &&
+      ("accessPolicy" in item || "mcpAccessPolicyId" in item || "mcpAccessOverrides" in item)
+    ) {
+      throw new Error(sourceText("error.import.transferNotFile"));
+    }
     const agent = decodeAgent(item);
     if (Result.isFailure(agent) || keys.has(agent.success.key) || !hasSafePaths(agent.success)) {
       warnings.push(sourceText("error.import.transferAgentInvalid", { number: index + 1 }));
@@ -291,6 +312,21 @@ export function decodeTransferManifest(bytes: Uint8Array): { manifest: TransferM
     else warnings.push(sourceText("error.import.transferSettingsInvalid"));
   }
   if (agents.length === 0 && settings === null) throw new Error(sourceText("error.import.transferEmpty"));
+  if (file.accessPolicy) {
+    const connectionIds = new Set(settings?.mcpServers.map(({ id }) => id));
+    if (
+      !validTransferAgentAccess(file.accessPolicy, keys) ||
+      (file.settings !== null && settings === null) ||
+      (settings !== null &&
+        (connectionIds.size !== settings.mcpServers.length ||
+          settings.mcpServers.some(({ id }) => !file.accessPolicy?.connectionIds.includes(id)) ||
+          file.accessPolicy.connectionIds.some(
+            (id) => id !== GITHUB_CONNECTOR_MCP_SERVER_ID && !connectionIds.has(id),
+          )))
+    ) {
+      throw new Error(sourceText("error.import.transferNotFile"));
+    }
+  }
   return {
     manifest: {
       appVersion: file.source.appVersion || "unknown",
@@ -302,6 +338,7 @@ export function decodeTransferManifest(bytes: Uint8Array): { manifest: TransferM
       signedIn: file.signedIn,
       channels: decodeChannels(file.channels ?? [], keys, warnings),
       exporter: file.exporter ?? null,
+      accessPolicy: file.accessPolicy ?? null,
     },
     warnings,
   };

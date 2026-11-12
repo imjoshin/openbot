@@ -100,6 +100,7 @@ import {
   type ChannelCommand,
   DEFAULT_DYNAMIC_ISLAND_PREFERENCE,
   decodeChannel,
+  GITHUB_CONNECTOR_MCP_SERVER_ID,
   IPC_ENDPOINTS,
   isGroqVoiceModelId,
   isLocalVoiceModelId,
@@ -107,6 +108,7 @@ import {
   isUpdateBusyPhase,
   LOCAL_SERVER_ID,
   latestTurnAnswer,
+  serverAuditName,
 } from "@openbot/contracts/ipc";
 import { decodeRecord, requiredString } from "@openbot/contracts/ipc-decoding";
 import { CHANNEL_ROUTES } from "@openbot/contracts/team-protocol/channels-v1";
@@ -141,6 +143,7 @@ import { BrowserProxyStore } from "../backend/browser-profiles/browser-proxy-sto
 import { runCauseEffect } from "../backend/effect-boundary";
 import { MailboxStore } from "../backend/mailbox-store";
 import { McpOAuth } from "../backend/mcp-oauth-provider";
+import { mcpOAuthProxyAgentKey } from "../backend/mcp-oauth-proxy";
 import { discordDriver, downloadDiscordAttachment } from "../backend/messaging/discord/discord-driver";
 import { MessagingOperationFailed, MessagingService } from "../backend/messaging/messaging-service";
 import { slackDriver } from "../backend/messaging/slack/slack-driver";
@@ -1809,12 +1812,17 @@ export async function createApplicationServices({
    * its MCP server and its `gh` and `git` files. An unreadable file is logged by the service and
    * treated as no sign-in.
    */
+  let githubMcpAllowed = (_agentId: string) => false;
   const githubConnector = new GitHubConnectorService({
     app: githubAppConfig(),
     store: new GitHubConnectorStore(join(app.getPath("userData"), GITHUB_CONNECTOR_FILE), secretCipher),
     toolDirectory: join(app.getPath("userData"), "provider-state", "github"),
     apiUrl: centralAuthApiUrl,
     openExternal: openLink,
+    allowsMcpAgentKey: (agentKey) => {
+      const agent = store.list().find(({ id }) => mcpOAuthProxyAgentKey(id) === agentKey);
+      return agent !== undefined && githubMcpAllowed(agent.id);
+    },
   });
   await runCauseEffect(githubConnector.load());
   teardown.push(TEARDOWN_ORDER.githubConnector, "the GitHub connection", () =>
@@ -2212,8 +2220,10 @@ export async function createApplicationServices({
     // handing every provider a command it cannot start.
     computerUseMcpServer: () => cuaDriver.mcpServerForProviders(),
     githubConnector: {
-      mcpServer: () => githubConnector.mcpServer(),
-      mcpAuthorization: () => githubConnector.mcpAuthorization().pipe(toMcpGatewayFailed),
+      mcpServer: (agentId) => githubConnector.mcpServer(agentId),
+      mcpAuthorization: (agentId) => githubConnector.mcpAuthorization(agentId).pipe(toMcpGatewayFailed),
+      accountLabel: () => githubConnector.status().login,
+      mcpBindingId: () => githubConnector.mcpBindingId(),
     },
     passwordVault: passwordVaultRouter([
       { prefix: "", vault: onePasswordConnector },
@@ -2266,6 +2276,7 @@ export async function createApplicationServices({
       }),
     tables,
   });
+  githubMcpAllowed = (agentId) => service.agentAccessPolicy.allows(agentId, GITHUB_CONNECTOR_MCP_SERVER_ID);
   teardown.push(TEARDOWN_ORDER.service, "the agent service", () => runCauseEffect(service.stop()));
   // The next turn of each agent uses the instructions of the new personality.
   serverPersonality.onChange(() => service.responseStyleChanged());
@@ -2947,6 +2958,10 @@ export async function createApplicationServices({
     skills: { library: () => skills.requireLocalLibrary(), installLocal: (input) => skills.installLocal(input) },
     sharedRoot: store.sharedRoot,
     channelActor: () => host.channelActor(),
+    recordAgentAccessImport: (actor) =>
+      serverAudit.record(teamStore.getIdentity()?.serverId ?? LOCAL_SERVER_ID, serverAuditName(actor.id, actor.name), [
+        { change: { kind: "agent-access-policy" } },
+      ]),
     webhookRoutines: {
       list: (owner) => events.listRoutines({ owner }),
       save: (input) => events.saveRoutine(input),
@@ -2972,6 +2987,7 @@ export async function createApplicationServices({
     settings: {
       mcpServers: () => service.listMcpServers(),
       saveMcpServer: (config) => service.saveMcpServer({ config }),
+      createMcpServerForTransfer: (config) => service.createMcpServerForTransfer(config),
       customProviders: () => customProviderChanges.list(),
       saveCustomProvider: (input) => customProviderChanges.save(input),
       customAgents: () => customAgentChanges.list(),
@@ -3141,6 +3157,7 @@ export async function createApplicationServices({
     sidebarPins,
     // Present, so the host advertises `agent-access-v1`. Only owners and admins change the roles.
     agentAccess,
+    agentAccessPolicy: service.agentAccessPolicy,
     // Present, so the host advertises `server-audit-v1`. Only owners and admins read the log.
     serverAudit,
     // Present, so the host advertises `agent-tasks-v1`. Any member who can send a message to the agent.

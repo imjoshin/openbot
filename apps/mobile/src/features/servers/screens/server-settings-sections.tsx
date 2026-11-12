@@ -66,7 +66,7 @@ interface LinkRowProps {
   icon: LucideIcon;
   pathname:
     | "/server-settings/members"
-    | "/server-settings/roles"
+    | "/server-settings/permissions"
     | "/server-settings/audit"
     | "/server-settings/vault"
     | "/server-settings/storage"
@@ -79,7 +79,8 @@ interface LinkRowProps {
 /** The role of this member, the members, and the roles and the audit log for a role that the host serves them to. */
 export function ServerPeopleSection({ server }: { server: MobileServer }) {
   const { t } = useText();
-  const { memberCountByServer, canManageServerRoles, canReadServerAudit } = useMobileWorkspace();
+  const { memberCountByServer, canManageServerRoles, canManageAgentAccessPolicy, canReadServerAudit } =
+    useMobileWorkspace();
   const memberCount = memberCountByServer[server.id];
   return (
     <SettingsSection title={t("mobile.server.settings.peopleSection")}>
@@ -110,11 +111,11 @@ export function ServerPeopleSection({ server }: { server: MobileServer }) {
           )
         }
       />
-      {canManageServerRoles(server.id) ? (
+      {canManageServerRoles(server.id) || canManageAgentAccessPolicy(server.id) ? (
         <LinkRow
-          label={t("mobile.server.route.roles")}
+          label={t("mobile.server.agentGroups.permissions")}
           icon={ShieldCheck}
-          pathname="/server-settings/roles"
+          pathname="/server-settings/permissions"
           serverId={server.id}
         />
       ) : null}

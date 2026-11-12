@@ -819,4 +819,12 @@ export const messages = defineMessages("settings", {
   "settings.transfer.result.signInButton": "Sign in to {provider}",
   "settings.transfer.result.notImported": "Not imported",
   "settings.transfer.result.warnings": "Check these",
+  "settings.transferMapping.description":
+    "Choose a destination group for each agent and a destination for each connection. Current access is kept. Other connections on this server stay Off.",
+  "settings.transferMapping.agents": "Destination groups",
+  "settings.transferMapping.connections": "Destination connections",
+  "settings.transferMapping.choose": "Choose",
+  "settings.transferMapping.review": "Review permissions",
+  "settings.transferMapping.import": "Import agents",
+  "settings.transferMapping.edit": "Change mapping",
 });

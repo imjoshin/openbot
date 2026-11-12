@@ -151,6 +151,7 @@ interface HostServiceOptions {
   /** The chats that each person pinned (`sidebar-pins-v1`). */
   sidebarPins?: SidebarPinStore;
   agentAccess?: AgentAccessStore;
+  agentAccessPolicy?: ForwardedApiOptions["agentAccessPolicy"];
   /** Records who joined, left, or got another server role. */
   serverAudit?: Pick<ServerAuditStore, "read" | "record">;
   agentTasks?: ForwardedApiOptions["agentTasks"];
@@ -515,6 +516,7 @@ export class HostService extends EventEmitter<HostEvents> {
         : { agentNotificationLevels: this.#agentNotificationLevels(options.agentNotificationLevels) }),
       ...(options.sidebarPins === undefined ? {} : { sidebarPins: this.#sidebarPins(options.sidebarPins) }),
       ...(options.agentAccess === undefined ? {} : { agentAccess: options.agentAccess }),
+      ...(options.agentAccessPolicy === undefined ? {} : { agentAccessPolicy: options.agentAccessPolicy }),
       ...(options.serverAudit === undefined ? {} : { serverAudit: options.serverAudit }),
       ...(options.agentTasks === undefined ? {} : { agentTasks: options.agentTasks }),
       ...(options.browserProfiles === undefined ? {} : { browserProfiles: options.browserProfiles }),

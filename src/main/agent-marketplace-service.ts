@@ -26,7 +26,7 @@ import {
 import { isBoolean, isDynamicRecord, isNumber, isOneOf, isString } from "@openbot/contracts/runtime-values";
 import { sourceText } from "@openbot/i18n/source";
 import { Effect, Result, Schema } from "effect";
-import type { AgentLifecycleFailed } from "../backend/agent-service";
+import type { AgentLifecycleFailed, AgentService } from "../backend/agent-service";
 import { causeHelpers } from "../backend/effect-boundary";
 import type { CentralAuthOperationError } from "./central-auth-effects";
 import type { SkillMarketplaceFailure } from "./skill-marketplace-service";
@@ -43,6 +43,7 @@ interface AgentMarketplaceAuth {
 }
 
 interface AgentMarketplaceAgents {
+  agentAccessPolicy?: Pick<AgentService["agentAccessPolicy"], "restriction">;
   listAgents(): AgentSummary[];
   listRoutines(agentId: string): Array<{
     id: string;
@@ -192,6 +193,12 @@ export class AgentMarketplaceService {
       if (avatar) {
         const bytes = new Uint8Array(yield* marketplaceIO(() => readFile(avatar.path)));
         form.set("avatar", new Blob([toArrayBuffer(bytes)], { type: avatar.mimeType }), "avatar");
+      }
+      const access = this.agents.agentAccessPolicy?.restriction(input.agentId);
+      if (access && (access.policyId !== null || Object.keys(access.overrides).length > 0)) {
+        return yield* new AgentMarketplaceFailure({
+          cause: new Error(sourceText("error.marketplace.agentAccessPolicyPublish")),
+        });
       }
       const submission = yield* this.auth
         .requestAuthorized("/v1/marketplace/agents/", { method: "POST", body: form }, decodeAgentSubmission, 30_000)

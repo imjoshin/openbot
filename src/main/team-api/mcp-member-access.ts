@@ -17,6 +17,13 @@ import { requireAdmin } from "./request-helpers";
 /** What a member may do on the MCP routes, or `null` for an owner or admin, who may do everything. */
 export type McpMemberAccess = { memberId: string; owners: TeamApiMcpServerOwners } | null;
 
+export function hasMcpMemberAccess(
+  capabilities: ReadonlySet<string>,
+  owners: TeamApiMcpServerOwners | undefined,
+): owners is TeamApiMcpServerOwners {
+  return owners !== undefined && capabilities.has(MCP_MEMBER_ACCESS_CAPABILITY);
+}
+
 /** Lets an owner or admin in, and a member when the client and this host have `mcp-member-access-v1`. */
 export function requireMcpAccess(
   member: TeamMemberSummary,
@@ -24,8 +31,9 @@ export function requireMcpAccess(
   owners: TeamApiMcpServerOwners | undefined,
 ): McpMemberAccess {
   if (canAdministerServer(member.role)) return null;
-  if (!owners || !capabilities.has(MCP_MEMBER_ACCESS_CAPABILITY)) requireAdmin(member);
-  return owners ? { memberId: member.id, owners } : null;
+  if (hasMcpMemberAccess(capabilities, owners)) return { memberId: member.id, owners };
+  requireAdmin(member);
+  return null;
 }
 
 /** Refuses a member a row that another person added. */

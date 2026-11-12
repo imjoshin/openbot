@@ -65,6 +65,7 @@ import { hostedDiskRestoreProbe, takeHostedServerEnvironment } from "./hosted-se
 import { takeHostingDeveloperKey } from "./hosted-server-service";
 import { accountIpcHandlers } from "./ipc/account-handlers";
 import { acpRegistryIpcHandlers } from "./ipc/acp-registry-handlers";
+import { agentAccessPolicyIpcHandlers } from "./ipc/agent-access-policy-handlers";
 import { agentAdminIpcHandlers } from "./ipc/agent-admin-handlers";
 import { agentDockIpcHandlers } from "./ipc/agent-dock-handlers";
 import { agentFolderIpcHandlers } from "./ipc/agent-folder-handlers";
@@ -847,6 +848,7 @@ function registerIpcHandlers({
   const getDialogParent = () => windows.getChatWindows().find((window) => window.isFocused()) ?? windowHolder.current;
 
   registerIpcGroups({
+    ...agentAccessPolicyIpcHandlers({ service, host, remoteServers, serverAudit, instanceTransfer }),
     ...appIpcHandlers({
       service,
       mailbox,

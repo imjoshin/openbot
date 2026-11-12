@@ -3,6 +3,10 @@
 // stand-in provider executables. Cases:
 // - claude-refresh-resumes: a runtime refresh (an MCP or skill change) closes the Claude process and
 //   the next turn resumes the same session, with no history handoff. Before, it started a new session.
+// - claude-mcp-global-refresh-start-race: another agent starts with the new MCP set while a provider
+//   release waits. An old release cannot unload the new runtime of that same provider session.
+// - claude-background-subagent-holds-access-edit: an access edit waits for a background subagent
+//   after its parent turn ends. The next turn uses the updated permissions.
 // - codex-approval-grant-keeps-session: a tool approval granted in `~/.codex/config.toml` keeps the
 //   Codex session. A revoked approval still replaces it. Before, a grant also replaced it.
 // - antigravity-channel-delta: a channel member on Antigravity gets only the unread channel messages
@@ -11,7 +15,8 @@
 //   each stand-in starts a child in its own process group and does not stop it, as an MCP server
 //   leaves its child. When OpenBot closes the provider process, the child must end too. Before, it
 //   stayed with no owner. Each child holds a socket to this check, and the check waits for it to close.
-// `bun scripts/provider-session-reuse-e2e.ts`. Writes .openbot-build/provider-session-reuse-e2e/report.json.
+// `bun scripts/provider-session-reuse-e2e.ts`. Use `--case=<name>` to run one case.
+// Writes to .openbot-build/provider-session-reuse-e2e/.
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
@@ -27,25 +32,42 @@ import {
   defaultProviderModel,
   type McpServerConfig,
 } from "@openbot/contracts/ipc";
-import { Effect } from "effect";
+import { Effect, Result } from "effect";
 import type { AgentClientFactory } from "../src/backend/agent/provider-runtime";
 import type { AgentBrowserHost } from "../src/backend/agent/turn-lifecycle";
 import type { AgentClient, DiagnosticOrigin } from "../src/backend/agent-client";
 import type { ClaudeCliInfo } from "../src/backend/cli";
+import type { McpServerSource } from "../src/backend/mcp-provider-shapes";
 import type { AppServerNotification, AppServerRequest, RequestId, ResponseDecoder } from "../src/backend/protocol";
 import { providerSync } from "../src/backend/provider-client-effects";
 import type { ReadProviderHistory } from "../src/backend/provider-history";
 
 const OUT = resolve(import.meta.dirname, "../.openbot-build/provider-session-reuse-e2e");
+const onlyCase = process.argv.find((arg) => arg.startsWith("--case="))?.slice("--case=".length);
 const root = await mkdtemp(join(tmpdir(), "openbot-session-reuse-"));
 const home = join(root, "home");
-const claudeExecutable = join(root, "claude");
+const claudeExecutable = join(root, process.platform === "win32" ? "claude.cmd" : "claude");
+const claudeScript = process.platform === "win32" ? join(root, "claude.cjs") : claudeExecutable;
 const claudeSpawns = join(root, "claude-spawns.jsonl");
 const claudeMessages = join(root, "claude-messages.jsonl");
+const finishClaudeSubagent = join(root, "finish-claude-subagent");
 const fakeCodex = join(root, "codex");
 const codexLog = join(root, "codex.jsonl");
 const codexConfig = join(root, "codex-mcp-servers.json");
 const mcpScript = join(root, "echo-mcp.js");
+const claudeMcpConnection: McpServerConfig = {
+  id: "",
+  name: "fixture_echo",
+  transport: "stdio",
+  enabled: true,
+  command: process.execPath,
+  args: [mcpScript],
+  env: [],
+  envPassthrough: [],
+  workingDirectory: "",
+  url: "",
+  headers: [],
+};
 const agyInstall = join(root, "antigravity");
 const fakeAgy = join(agyInstall, "1.5.4", "bin", "antigravity");
 const agyLog = join(root, "agy.jsonl");
@@ -55,6 +77,7 @@ const CLAUDE_MODEL = defaultProviderModel("claude");
 // Before the service modules load: the stores and the CLI search read these.
 process.env.HOME = home;
 process.env.CODEX_HOME = join(home, ".codex");
+process.env.CLAUDE_CONFIG_DIR = join(home, ".claude");
 // Bun's homedir does not follow HOME, and the Antigravity driver reads and writes the sign-in here.
 process.env.GEMINI_HOME = join(home, ".gemini");
 process.env.OPENBOT_CLAUDE_PATH = claudeExecutable;
@@ -70,6 +93,7 @@ const { MailboxStore } = await import("../src/backend/mailbox-store");
 const { OpenBotDatabase } = await import("../src/backend/openbot-database");
 const { CODEX_PLACEHOLDER_COMMAND, codexMcpServerKey } = await import("../src/backend/mcp-provider-shapes");
 const { CURRENT_MESSAGE_SEPARATOR, HANDOFF_START } = await import("../src/backend/agent/delivery-content");
+const { getString } = await import("../src/backend/protocol");
 
 /** A child that holds a socket to this check until it ends. It writes its process id. */
 const GROUP_CHILD = `const socket = require("node:net").connect(${JSON.stringify(groupSocket)});
@@ -102,20 +126,41 @@ const option = (name) => {
 };
 const resume = option("--resume");
 const sessionId = resume ?? option("--session-id") ?? randomUUID();
-fs.appendFileSync(${JSON.stringify(claudeSpawns)}, JSON.stringify({ pid: process.pid, resume, sessionId }) + "\\n");
+const mcpConfig = option("--mcp-config");
+const mcpNames = mcpConfig?.startsWith("{") ? Object.keys(JSON.parse(mcpConfig).mcpServers ?? {}) : [];
+fs.appendFileSync(${JSON.stringify(claudeSpawns)}, JSON.stringify({ pid: process.pid, resume, sessionId, mcpNames }) + "\\n");
 const write = (message) => process.stdout.write(JSON.stringify(message) + "\\n");
 let requests = 0;
+let background = null;
 const turn = (message) => {
   const content = message.message?.content;
   const text = typeof content === "string" ? content : (content ?? []).map((block) => block.text ?? "").join("");
   fs.appendFileSync(${JSON.stringify(claudeMessages)}, JSON.stringify({ pid: process.pid, sessionId, text }) + "\\n");
   const id = "msg_" + process.pid + "_" + (++requests);
   const usage = { input_tokens: 10, cache_read_input_tokens: 100, output_tokens: 20 };
+  if (text.split(${JSON.stringify(CURRENT_MESSAGE_SEPARATOR)}).at(-1).includes("START-BACKGROUND-SUBAGENT")) {
+    background = { task: "bg-" + id, tool: "toolu_" + id };
+    write({ type: "assistant", message: { id: id + "-call", type: "message", role: "assistant", model: ${JSON.stringify(CLAUDE_MODEL)},
+      content: [{ type: "tool_use", id: background.tool, name: "Agent",
+        input: { description: "Check the fixture", prompt: "Check the fixture", run_in_background: true } }],
+      stop_reason: "tool_use", usage }, parent_tool_use_id: null, session_id: sessionId, uuid: randomUUID() });
+    write({ type: "system", subtype: "task_started", task_id: background.task, tool_use_id: background.tool,
+      is_backgrounded: true, description: "Check the fixture", session_id: sessionId, uuid: randomUUID() });
+    write({ type: "system", subtype: "background_tasks_changed", tasks: [{ id: background.task, type: "local_agent" }],
+      session_id: sessionId, uuid: randomUUID() });
+  }
   write({ type: "assistant", message: { id, type: "message", role: "assistant", model: ${JSON.stringify(CLAUDE_MODEL)},
     content: [{ type: "text", text: "Done." }], stop_reason: null, usage }, parent_tool_use_id: null, session_id: sessionId, uuid: randomUUID() });
   write({ type: "result", subtype: "success", is_error: false, result: "Done.", session_id: sessionId, uuid: randomUUID(),
     duration_ms: 1, duration_api_ms: 1, num_turns: 1, total_cost_usd: 0.01, usage, permission_denials: [] });
 };
+setInterval(() => {
+  if (!background || !fs.existsSync(${JSON.stringify(finishClaudeSubagent)})) return;
+  write({ type: "system", subtype: "task_notification", task_id: background.task, tool_use_id: background.tool,
+    status: "completed", summary: "Check complete.", output_file: "", session_id: sessionId, uuid: randomUUID() });
+  write({ type: "system", subtype: "background_tasks_changed", tasks: [], session_id: sessionId, uuid: randomUUID() });
+  background = null;
+}, 25).unref();
 let buffer = "";
 process.stdin.setEncoding("utf8");
 process.stdin.on("data", (chunk) => {
@@ -263,6 +308,13 @@ interface ClientEvents {
   diagnostic: [message: string, origin?: DiagnosticOrigin];
 }
 
+type Release = ReturnType<InstanceType<typeof ClaudeAgentClient>["releaseThread"]>;
+interface ClaudeFixtureControls {
+  mcpServers?: McpServerSource;
+  release?: (threadId: string, operation: Release) => Release;
+  resumed?: (threadId: string) => void;
+}
+
 /**
  * The real Claude client. Only the account, usage and model reads are answered here: the real ones
  * run `claude auth status` or a probe query. Sessions, turns and events come from the real client.
@@ -271,11 +323,19 @@ class ClaudeStandIn extends EventEmitter<ClientEvents> implements AgentClient {
   readonly provider = "claude";
   readonly contextCompaction = "native";
   readonly #real: InstanceType<typeof ClaudeAgentClient>;
+  readonly #controls: ClaudeFixtureControls;
   readonly readHistory: ReadProviderHistory;
 
-  constructor(cli: ClaudeCliInfo) {
+  constructor(cli: ClaudeCliInfo, controls: ClaudeFixtureControls = {}) {
     super();
-    this.#real = new ClaudeAgentClient(cli);
+    this.#controls = controls;
+    this.#real = new ClaudeAgentClient(
+      cli,
+      undefined,
+      undefined,
+      undefined,
+      (agentId) => controls.mcpServers?.(agentId) ?? [],
+    );
     this.readHistory = this.#real.readHistory;
     this.#real.on("notification", (notification) => this.emit("notification", notification));
     this.#real.on("request", (request) => this.emit("request", request));
@@ -297,8 +357,9 @@ class ClaudeStandIn extends EventEmitter<ClientEvents> implements AgentClient {
 
   canReleaseProcess = () => this.#real.canReleaseProcess();
 
-  releaseThread(externalThreadId: string) {
-    return this.#real.releaseThread(externalThreadId);
+  releaseThread(externalThreadId: string, resumes = false) {
+    const operation = this.#real.releaseThread(externalThreadId, resumes);
+    return this.#controls.release?.(externalThreadId, operation) ?? operation;
   }
 
   releaseIdleThreads() {
@@ -314,6 +375,11 @@ class ClaudeStandIn extends EventEmitter<ClientEvents> implements AgentClient {
         return providerSync(() => decoder({ rateLimits: null, rateLimitsByLimitId: null }));
       case "model/list":
         return providerSync(() => decoder({ data: [{ model: CLAUDE_MODEL, displayName: "Claude" }] }));
+      case "thread/resume": {
+        const threadId = getString(params, "threadId");
+        if (threadId) this.#controls.resumed?.(threadId);
+        return this.#real.request(method, params, decoder, timeoutMs);
+      }
       default:
         return this.#real.request(method, params, decoder, timeoutMs);
     }
@@ -352,6 +418,17 @@ interface CaseDetails {
   channelPromptCount?: number;
   tasks?: string[];
   groupChildren?: { pid: number; endedWithProvider: boolean }[];
+  globalRefresh?: {
+    affectedSawNewTools: boolean;
+    unaffectedSessionPreserved: boolean;
+    lateReleaseKeptRouting: boolean;
+  };
+  backgroundPolicy?: {
+    parentEnded: boolean;
+    changeRejected: boolean;
+    sameRevisionRetry: boolean;
+    nextTurnRestricted: boolean;
+  };
 }
 
 interface CaseReport {
@@ -425,6 +502,7 @@ async function runCase(
   run: (profile: Profile, details: CaseDetails) => Promise<void>,
   clientFactory?: AgentClientFactory,
 ): Promise<void> {
+  if (onlyCase && onlyCase !== name) return;
   const result: CaseReport = { name, passed: false, details: {} };
   report.cases.push(result);
   const database = new OpenBotDatabase(join(root, `user-data-${name}`));
@@ -570,8 +648,9 @@ const runGroupCase = (
   provider: AgentProviderId,
   close: (profile: Profile) => Promise<void>,
   options: { model?: string; clientFactory?: AgentClientFactory } = {},
-) =>
-  withGroupChildren((children) =>
+) => {
+  if (onlyCase && onlyCase !== name) return Promise.resolve();
+  return withGroupChildren((children) =>
     runCase(
       name,
       provider,
@@ -588,8 +667,12 @@ const runGroupCase = (
       options.clientFactory,
     ),
   );
+};
 
-await writeFile(claudeExecutable, STAND_IN_CLAUDE, { mode: 0o755 });
+await writeFile(claudeScript, STAND_IN_CLAUDE, { mode: 0o755 });
+if (process.platform === "win32") {
+  await writeFile(claudeExecutable, `@echo off\r\n"${process.execPath}" "${claudeScript}" %*\r\n`);
+}
 await writeFile(fakeCodex, FAKE_CODEX, { mode: 0o755 });
 await writeFile(mcpScript, "process.stdin.resume();\n");
 await mkdir(join(agyInstall, "1.5.4", "bin"), { recursive: true });
@@ -632,6 +715,190 @@ try {
       assert.equal(details.secondTurnHasHandoff, false, "The second message has no history handoff.");
     },
     (_provider, cli) => new ClaudeStandIn(cli),
+  );
+
+  const controls: ClaudeFixtureControls = {};
+  await runCase(
+    "claude-mcp-global-refresh-start-race",
+    "claude",
+    async (profile, details) => {
+      const { agents, store } = profile;
+      controls.mcpServers = (agentId) => (agentId ? agents.enabledMcpServers(agentId) : []);
+      await createAgent(agents, "First agent", "claude", CLAUDE_MODEL);
+      await createAgent(agents, "Second agent", "claude", CLAUDE_MODEL);
+      await createAgent(agents, "Other agent", "claude", CLAUDE_MODEL);
+      const [first, second, other] = store.list();
+      assert.ok(first?.threadId && second?.threadId && other?.threadId);
+      const session = (threadId: string) => store.database.activeProviderSession(threadId, "claude")?.externalSessionId;
+      const firstId = session(first.threadId);
+      const secondId = session(second.threadId);
+      const otherId = session(other.threadId);
+      assert.ok(firstId && secondId && otherId);
+
+      const owner = { userId: "local", role: "owner" } as const;
+      const snapshot = await Effect.runPromise(agents.agentAccessPolicy.read(owner));
+      const group = await Effect.runPromise(
+        agents.agentAccessPolicy.apply(
+          {
+            kind: "savePolicy",
+            expectedRevision: snapshot.revision,
+            policyId: null,
+            name: "Fixture deny new connections",
+            allowNewConnections: false,
+            choices: {},
+            assignments: [{ agentId: other.id, assigned: true, keepOverrides: false }],
+          },
+          owner,
+        ),
+      );
+      assert.equal(group.status, "saved");
+
+      const releases: string[] = [];
+      const holdRelease = (threadId: string) => {
+        const finish = Promise.withResolvers<void>();
+        let tookRelease = false;
+        let waiting = false;
+        controls.release = (id, operation) => {
+          releases.push(id);
+          if (id !== threadId || tookRelease) return operation;
+          tookRelease = true;
+          return operation.pipe(
+            Effect.andThen(
+              Effect.promise(() => {
+                waiting = true;
+                return finish.promise;
+              }),
+            ),
+          );
+        };
+        return { waiting: () => waiting, finish: finish.resolve };
+      };
+      const firstRelease = holdRelease(firstId);
+      const initial = entries<{ pid: number; sessionId: string }>(claudeSpawns).length;
+      const connection = claudeMcpConnection;
+      const saved = runCauseEffect(agents.saveMcpServer({ config: connection }));
+      try {
+        await waitFor("first provider release", firstRelease.waiting);
+        await sendTurn(profile, second.id, "affected during the first release");
+        const opened = entries<{ sessionId: string; resume: string | null; mcpNames: string[] }>(claudeSpawns).slice(
+          initial,
+        );
+        assert.ok(
+          opened.some((spawn) => spawn.resume === secondId && spawn.mcpNames.includes(connection.name)),
+          "The affected agent resumes with the new connection while the first release waits.",
+        );
+        await sendTurn(profile, other.id, "unaffected during the first release");
+        assert.ok(!agents.enabledMcpServers(other.id).some(({ name }) => name === connection.name));
+        assert.equal(session(other.threadId), otherId);
+        assert.ok(
+          !releases.includes(otherId),
+          "The MCP registration must not release an agent that denies the new connection.",
+        );
+      } finally {
+        firstRelease.finish();
+        await saved;
+      }
+
+      const secondRelease = holdRelease(secondId);
+      let secondResumes = 0;
+      controls.resumed = (id) => {
+        if (id === secondId) secondResumes++;
+      };
+      const registered = (await saved).find(({ name }) => name === connection.name);
+      assert.ok(registered);
+      const removed = runCauseEffect(agents.removeMcpServer({ mcpServerId: registered.id }));
+      try {
+        await waitFor("second provider release", secondRelease.waiting);
+        await sendTurn(profile, second.id, "resume while the old release finishes");
+        assert.equal(secondResumes, 1);
+        const resumed = entries<{ resume: string | null; mcpNames: string[] }>(claudeSpawns).findLast(
+          ({ resume }) => resume === secondId,
+        );
+        assert.ok(resumed && !resumed.mcpNames.includes(connection.name));
+      } finally {
+        secondRelease.finish();
+        await removed;
+      }
+      await sendTurn(profile, second.id, "keep the newly loaded session");
+      details.globalRefresh = {
+        affectedSawNewTools: true,
+        unaffectedSessionPreserved: true,
+        lateReleaseKeptRouting: secondResumes === 1,
+      };
+      assert.equal(secondResumes, 1, "The first refresh must not unload the newly resumed session.");
+    },
+    (_provider, cli) => new ClaudeStandIn(cli, controls),
+  );
+
+  const backgroundControls: ClaudeFixtureControls = {};
+  await runCase(
+    "claude-background-subagent-holds-access-edit",
+    "claude",
+    async (profile, details) => {
+      const { agents, store } = profile;
+      backgroundControls.mcpServers = (agentId) => (agentId ? agents.enabledMcpServers(agentId) : []);
+      const rows = await runCauseEffect(agents.saveMcpServer({ config: claudeMcpConnection }));
+      const connection = rows.find(({ name }) => name === claudeMcpConnection.name);
+      assert.ok(connection);
+      const agent = await createAgent(agents, "Background policy", "claude", CLAUDE_MODEL);
+      assert.ok(agent.threadId);
+      const initial = store.database.activeProviderSession(agent.threadId, "claude");
+      assert.ok(initial);
+      const handoff = (sessionId: string) =>
+        entries<{ sessionId: string; mcpNames: string[] }>(claudeSpawns).findLast(
+          (spawn) => spawn.sessionId === sessionId,
+        );
+      assert.ok(handoff(initial.externalSessionId)?.mcpNames.includes(connection.name));
+
+      await sendTurn(profile, agent.id, "START-BACKGROUND-SUBAGENT");
+      const running = () => agents.getRuntimeSnapshot().subagentTurns?.some(({ agentId }) => agentId === agent.id);
+      await waitFor("the background subagent", running);
+      assert.ok(!agents.getRuntimeSnapshot().activeTurns.some(({ agentId }) => agentId === agent.id));
+      assert.equal((await runCauseEffect(agents.readConversation(agent.id))).activeTurnId, null);
+
+      const owner = { userId: "local", role: "owner" } as const;
+      const before = await Effect.runPromise(agents.agentAccessPolicy.read(owner));
+      const mutation = {
+        kind: "setOverride" as const,
+        expectedRevision: before.revision,
+        agentId: agent.id,
+        connectionId: connection.id,
+        allowed: false,
+      };
+      const refused = await Effect.runPromise(Effect.result(agents.agentAccessPolicy.apply(mutation, owner)));
+      assert.ok(Result.isFailure(refused));
+      assert.equal(refused.failure.code, "busy");
+      assert.deepEqual(refused.failure.agentIds, [agent.id]);
+      assert.ok(refused.failure.message.includes(agent.name));
+      assert.deepEqual(await Effect.runPromise(agents.agentAccessPolicy.read(owner)), before);
+
+      await writeFile(finishClaudeSubagent, "");
+      await waitFor(
+        "the subagent to complete and the agent to be idle",
+        () => !running() && !agents.workingAgents().some(({ id }) => id === agent.id),
+      );
+      const finished = await runCauseEffect(agents.readConversation(agent.id));
+      assert.ok(
+        finished.messages.some(({ subagents }) =>
+          subagents?.some((child) => child.background && child.status === "completed"),
+        ),
+      );
+      const saved = await Effect.runPromise(agents.agentAccessPolicy.apply(mutation, owner));
+      assert.equal(saved.status, "saved");
+      assert.equal(agents.agentAccessPolicy.allows(agent.id, connection.id), false);
+      await sendTurn(profile, agent.id, "Use the updated permissions.");
+      const current = store.database.activeProviderSession(agent.threadId, "claude");
+      assert.ok(current && current.externalSessionId !== initial.externalSessionId);
+      const currentHandoff = handoff(current.externalSessionId);
+      assert.ok(currentHandoff && !currentHandoff.mcpNames.includes(connection.name));
+      details.backgroundPolicy = {
+        parentEnded: true,
+        changeRejected: true,
+        sameRevisionRetry: true,
+        nextTurnRestricted: true,
+      };
+    },
+    (_provider, cli) => new ClaudeStandIn(cli, backgroundControls),
   );
 
   await runCase("codex-approval-grant-keeps-session", "codex", async (profile, details) => {
@@ -776,15 +1043,23 @@ try {
   const stopService = (profile: Profile) => runCauseEffect(profile.agents.stop());
   await runGroupCase("codex-stop-ends-process-group", "codex", stopService);
 
-  report.passed = report.cases.length === 5 && report.cases.every((entry) => entry.passed);
+  report.passed = report.cases.length === (onlyCase ? 1 : 7) && report.cases.every((entry) => entry.passed);
 } finally {
   mkdirSync(OUT, { recursive: true });
-  writeFileSync(join(OUT, "report.json"), `${JSON.stringify(report, null, 2)}\n`);
-  await rm(root, { recursive: true, force: true });
+  const reportName = onlyCase ? "focused-report.json" : "report.json";
+  const reportPath = join(
+    OUT,
+    onlyCase === "claude-background-subagent-holds-access-edit" ? "background-policy-report.json" : reportName,
+  );
+  writeFileSync(reportPath, `${JSON.stringify(report, null, 2)}\n`);
+  await rm(root, { recursive: true, force: true, maxRetries: 4, retryDelay: 50 }).catch((error: Error) => {
+    if (process.platform !== "win32" || !("code" in error) || error.code !== "EBUSY") throw error;
+    process.stderr.write(`Could not remove the temporary provider profile. ${error.message}\n`);
+  });
   for (const entry of report.cases) {
     process.stdout.write(`${entry.passed ? "PASS" : "FAIL"} ${entry.name} ${JSON.stringify(entry.details)}\n`);
     if (entry.error) process.stdout.write(`${entry.error}\n`);
   }
-  process.stdout.write(`${report.passed ? "PASS" : "FAIL"} ${join(OUT, "report.json")}\n`);
+  process.stdout.write(`${report.passed ? "PASS" : "FAIL"} ${reportPath}\n`);
   if (!report.passed) process.exitCode = 1;
 }

@@ -1,4 +1,4 @@
-import type { AgentLifecycleFailed } from "../backend/agent-service";
+import type { AgentLifecycleFailed, AgentService } from "../backend/agent-service";
 import type { CentralAuthOperationError } from "./central-auth-effects";
 import type { SkillMarketplaceFailure } from "./skill-marketplace-service";
 // Link-only agent templates on the account Worker.
@@ -93,6 +93,7 @@ interface AgentTemplateAuth {
 }
 
 interface AgentTemplateAgents {
+  agentAccessPolicy?: Pick<AgentService["agentAccessPolicy"], "restriction">;
   listAgents(): AgentSummary[];
   listRoutines(agentId: string): Array<{
     name: string;
@@ -205,6 +206,12 @@ export class AgentTemplateService {
       const avatar = yield* this.readAvatar(agentId);
       if (avatar) form.set("avatar", new Blob([toArrayBuffer(avatar.bytes)], { type: avatar.mimeType }), "avatar");
       if (card) form.set("card", new Blob([toArrayBuffer(card)], { type: "image/png" }), "card.png");
+      const access = this.agents.agentAccessPolicy?.restriction(agentId);
+      if (access && (access.policyId !== null || Object.keys(access.overrides).length > 0)) {
+        return yield* new AgentTemplateFailure({
+          cause: new Error(sourceText("error.marketplace.agentAccessPolicyPublish")),
+        });
+      }
       const owned = yield* this.auth
         .requestAuthorized("/v1/agent-templates/", { method: "POST", body: form }, decodeOwnedTemplate, 30_000)
         .pipe(toAgentTemplateFailure);

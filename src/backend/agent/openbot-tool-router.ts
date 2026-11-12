@@ -326,13 +326,14 @@ export interface OpenBotToolRouterHooks {
   preferredProvider(): AgentProvider;
   createAgent(
     input: CreateAgentInput,
+    creatorId: string,
     configure?: (agent: AgentSummary) => Effect.Effect<AgentSummary, ToolOperationFailed>,
   ): Effect.Effect<AgentSummary, ToolOperationFailed>;
   /** `initiatingAgentId` is the calling agent, recorded with a model change. */
   updateAgent(input: UpdateAgentInput, initiatingAgentId: string): Effect.Effect<AgentSummary, ToolOperationFailed>;
   setAvatar(agentId: string, image: AvatarImageInput | null): Effect.Effect<AgentSummary, ToolOperationFailed>;
   /** The MCP servers of this computer that are turned on, before the Computer Use setting of one agent. */
-  enabledMcpServers(): McpServerConfig[];
+  enabledMcpServers(agentId: string): McpServerConfig[];
   emitError(code: string, error: unknown, agentId?: string): void;
   /** Masks the MCP secret values and handoff values that `redactText` does not know. */
   redactMcp(text: string): string;
@@ -395,11 +396,11 @@ export interface OpenBotToolRouterOptions {
   /** Downloads and reads online videos for `read_video`; null where this process cannot decode them. */
   videoReader?: VideoReaderHost | null | undefined;
   /** The MCP servers of this OpenBot server, for the MCP tools; null where nothing holds them. */
-  mcpServers?: AgentMcpServers | null | undefined;
+  mcpServers?: ((agentId: string) => AgentMcpServers) | null | undefined;
   /** The saved server that a Marketplace app installs, or null when it is not installed. */
   marketplaceAppServer?: ((appId: string) => MarketplaceAppServer | null) | undefined;
   /** Whether the built-in GitHub connection gives agents GitHub now. */
-  githubConnected?: (() => boolean) | undefined;
+  githubConnected?: ((agentId: string) => boolean) | undefined;
   /** This build's version and system for `send_feedback`; null where this process does not know them. */
   feedbackFacts?: FeedbackFacts | null | undefined;
   /** Sends approved `send_feedback` text; null where this process has no account service. */
@@ -447,9 +448,9 @@ export class OpenBotToolRouter {
   readonly #visualPreview: ChatVisualPreviewHost | null;
   readonly #screenCapture: ScreenCaptureHost | null;
   readonly #videoReader: VideoReaderHost | null;
-  readonly #mcpServers: AgentMcpServers | null;
+  readonly #mcpServers: ((agentId: string) => AgentMcpServers) | null;
   readonly #marketplaceAppServer: (appId: string) => MarketplaceAppServer | null;
-  readonly #githubConnected: () => boolean;
+  readonly #githubConnected: (agentId: string) => boolean;
   readonly #feedbackFacts: FeedbackFacts | null;
   readonly #feedback: AgentFeedback | null;
   /** The last OpenBot tool failures of each provider thread, for the errors of a report. */
@@ -903,10 +904,13 @@ export class OpenBotToolRouter {
    */
   #deferredMcpNote(client: AgentClient, threadId: string): string | null {
     if (client.deferredMcpTools?.(threadId)) return DEFERRED_MCP_NOTE;
+    const agentId = this.#conversation.agentForThread(threadId);
+    if (!agentId) return null;
+    const configs = this.#hooks.enabledMcpServers(agentId);
     if (client.provider === "opencode")
-      return openCodeMcpServers(this.#mcpServers?.list() ?? []).length > 0 ? OPENCODE_DEFERRED_MCP_NOTE : null;
+      return openCodeMcpServers(configs).length > 0 ? OPENCODE_DEFERRED_MCP_NOTE : null;
     if (client.provider !== "codex") return null;
-    return codexDeferredMcpServers(this.#mcpServers?.list() ?? []).length > 0 ? CODEX_DEFERRED_MCP_NOTE : null;
+    return codexDeferredMcpServers(configs).length > 0 ? CODEX_DEFERRED_MCP_NOTE : null;
   }
 
   /**
@@ -1438,10 +1442,17 @@ export class OpenBotToolRouter {
    * headers can hold secrets.
    */
 
-  readonly #readAgent = Effect.fn("OpenBotToolRouter.readAgent")(function* (this: OpenBotToolRouter, agentId: string) {
+  readonly #readAgent = Effect.fn("OpenBotToolRouter.readAgent")(function* (
+    this: OpenBotToolRouter,
+    agentId: string,
+    observerId: string,
+  ) {
     const agent = yield* toolStep(() => this.#requireAgent(agentId));
     const computerUse = agentComputerUseEnabled(agent);
-    const mcpServers = agentMcpServers(this.#hooks.enabledMcpServers(), computerUse);
+    const available = new Set(this.#hooks.enabledMcpServers(observerId).map(({ id }) => id));
+    const mcpServers = agentMcpServers(this.#hooks.enabledMcpServers(agent.id), computerUse).filter(({ id }) =>
+      available.has(id),
+    );
     let skills: unknown[] | undefined;
     let skillsError: string | undefined;
     const loaded = yield* Effect.result(
@@ -1779,7 +1790,7 @@ export class OpenBotToolRouter {
 
     if (params.tool === "read_agent") {
       const args = readAgentToolSchema.parse(params.arguments ?? {});
-      const payload = yield* this.#readAgent(args.agentId ?? senderAgentId);
+      const payload = yield* this.#readAgent(args.agentId ?? senderAgentId, senderAgentId);
       return { success: true, contentItems: [{ type: "inputText", text: redactText(JSON.stringify(payload)) }] };
     }
 
@@ -1974,17 +1985,21 @@ export class OpenBotToolRouter {
         });
       }
       // A card that asks for a connection the user already made is a dead end: they see "Connected".
-      if (args.app === "github" && this.#githubConnected())
+      if (args.app === "github" && this.#githubConnected(senderAgentId))
         return openBotToolResult({
           status: "connected",
           app: args.app,
-          next: "GitHub is already connected for every agent of this server. Do not ask the user to connect it again. Use the GitHub MCP tools; when they are not in your tool list, search your tools for github, or use gh and git, which this connection signs in. When none of them works, tell the user in one sentence and call openbot.send_feedback.",
+          next: "GitHub is connected for this agent. Use the GitHub MCP tools or search for github.",
         });
       const installed = this.#marketplaceAppServer(args.app);
-      if (installed && this.#mcpServers)
-        return yield* marketplaceAppStatus(this.#mcpServers, installed, (config) =>
+      const servers = this.#mcpServers?.(senderAgentId);
+      if (installed && servers) {
+        if (!servers.list().some(({ id }) => id === installed.config.id))
+          return openBotToolFailure(sourceText("error.agentAccessPolicy.connectionDenied"));
+        return yield* marketplaceAppStatus(servers, installed, (config) =>
           toolStep(() => this.#postMcpSignInCard(senderAgentId, executionThreadId, params.turnId, config)),
         );
+      }
       this.#postSystemCard(senderAgentId, executionThreadId, params.turnId, {
         itemType: marketplaceSuggestionItemType({ appId: args.app }),
         text: sourceText("status.agent.marketplaceSuggested", { app: args.app }),
@@ -2248,7 +2263,7 @@ export class OpenBotToolRouter {
     params: DynamicToolCallParams,
   ) {
     const agentId = this.#conversation.agentForThread(params.threadId);
-    const servers = this.#mcpServers;
+    const servers = agentId ? this.#mcpServers?.(agentId) : null;
     if (!agentId || !servers || !isMcpServerTool(params.tool))
       return openBotToolFailure(sourceText("error.agent.toolRequestInvalid"));
     const threadId = this.#conversation.publicThreadId(agentId, params.threadId);
@@ -2290,7 +2305,7 @@ export class OpenBotToolRouter {
     agentId: string,
     params: DynamicToolCallParams,
   ) {
-    const servers = this.#mcpServers;
+    const servers = this.#mcpServers?.(agentId);
     if (!servers || params.tool !== "tool_search") return [];
     const configs = servers.list();
     const names = new Set(
@@ -2320,6 +2335,12 @@ export class OpenBotToolRouter {
    * test in the same turn, or the same search sent twice, ask for the same sign-in.
    */
   #postMcpSignInCard(agentId: string, threadId: string, turnId: string, config: McpServerConfig): void {
+    if (
+      !this.#mcpServers?.(agentId)
+        .list()
+        .some(({ id, enabled }) => id === config.id && enabled)
+    )
+      return;
     const itemType = mcpSignInItemType({ mcpServerId: config.id });
     const messages = this.#conversation.ensureSnapshot(agentId, threadId).messages;
     if (messages.some((message) => message.turnId === turnId && message.itemType === itemType)) return;
@@ -2552,6 +2573,7 @@ export class OpenBotToolRouter {
                 }
               : {}),
           },
+          senderAgentId,
           (agent) =>
             Effect.gen({ self: this }, function* () {
               if (assign) yield* assign(agent.id).pipe(toToolOperationFailed);

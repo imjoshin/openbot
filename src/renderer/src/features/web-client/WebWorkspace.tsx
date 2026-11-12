@@ -28,6 +28,7 @@ import {
 } from "@openbot/contracts/ipc";
 import type { PricingOrder } from "@openbot/contracts/license";
 import type { MarketplaceListingLink } from "@openbot/contracts/marketplace-links";
+import { AGENT_ACCESS_POLICY_CAPABILITY } from "@openbot/contracts/team-protocol/agent-access-policy-v1";
 import { AGENT_ACCESS_CAPABILITY } from "@openbot/contracts/team-protocol/agent-access-v1";
 import { AGENT_BACKUP_MODELS_ROUTES } from "@openbot/contracts/team-protocol/agent-backup-models-v1";
 import { AGENT_FAST_MODE_ROUTES } from "@openbot/contracts/team-protocol/agent-fast-mode-v1";
@@ -87,13 +88,16 @@ import { WEBHOOK_SENDER_SECRET_CAPABILITY } from "@openbot/contracts/team-protoc
 import { WEBHOOK_TESTS_CAPABILITY } from "@openbot/contracts/team-protocol/webhook-tests-v1";
 import { WHATSAPP_CONNECTOR_CAPABILITY } from "@openbot/contracts/team-protocol/whatsapp-connector-v1";
 import { WORKFLOWS_CAPABILITY } from "@openbot/contracts/team-protocol/workflows-v1";
+import { sourceText as sourceErrorText } from "@openbot/i18n/source";
 import { runTeamEffect } from "@openbot/team-client";
 import { channelForThread } from "@openbot/team-client/channel-notifications";
 import {
+  applyAgentAccessPolicy,
   cancelHostUpdate,
   checkHostForUpdate,
   checkHostRelease,
   clearStorage,
+  createAgentWithAccessPolicy,
   deleteHostedSite,
   deleteStoredFile,
   getAgentAdminSettings,
@@ -111,8 +115,10 @@ import {
   getHostTimezone,
   getHostUpdateStatus,
   getStorageUsage,
+  listAgentAccessPolicies,
   listHostBackgroundProcesses,
   listHostedSites,
+  previewAgentAccessPolicy,
   setHostAgentAccess,
   setHostAgentMemoryLimit,
   setHostBrowsingMemory,
@@ -142,6 +148,7 @@ import { LicenseSection } from "@openbot/ui/features/billing/LicenseSection";
 import { createLicenseStore } from "@openbot/ui/features/billing/license-store";
 import { unloadedHistory } from "@openbot/ui/features/conversation/ChatScrollRail";
 import type { DiagramModelChoice } from "@openbot/ui/features/diagrams/DiagramNewAgentCard";
+import type { AgentAccessPolicyCalls } from "@openbot/ui/features/servers/AgentGroups";
 import { LeaveServerDialog } from "@openbot/ui/features/servers/LeaveServerDialog";
 import { RestartServerDialog } from "@openbot/ui/features/servers/RestartServerDialog";
 import type { ServerActionCallbacks } from "@openbot/ui/features/servers/ServerActionItems";
@@ -313,7 +320,7 @@ import { createWebConversationView } from "./web-conversation-view";
 import { createWebFileSaver } from "./web-file-download";
 import { webGitHubConnectorPort } from "./web-github-connector";
 import { createWebHostedServers } from "./web-hosted-server-state";
-import { createWebInstanceTransferCalls } from "./web-instance-transfer";
+import { createWebInstanceTransferCalls, createWebInstanceTransferMappingCalls } from "./web-instance-transfer";
 import { webMachineCalls } from "./web-machine-calls";
 import { createWebAgentTemplateCalls, createWebMarketplaceCalls } from "./web-marketplace";
 import { webHostMessaging } from "./web-messaging-connector";
@@ -1491,7 +1498,18 @@ function WebWorkspaceFrame(props: WebWorkspaceProps) {
     workspace.state.capabilities.includes(INSTANCE_TRANSFER_CAPABILITY) &&
     canAdministerServer(workspace.state.host?.role);
   // A named function, not a ternary in the prop: the settings read the prop in a tracked effect.
-  const instanceTransferSettings = () => (instanceTransferEnabled() ? { calls: instanceTransferCalls } : undefined);
+  const instanceTransferMapping = createWebInstanceTransferMappingCalls(hostRequest, () =>
+    workspace.runtime.listAgents(),
+  );
+  const instanceTransferSettings = () =>
+    instanceTransferEnabled()
+      ? {
+          calls: instanceTransferCalls,
+          policyMapping: serverCanAdminister(server(), AGENT_ACCESS_POLICY_CAPABILITY)
+            ? instanceTransferMapping
+            : undefined,
+        }
+      : undefined;
   const memberUpdateAccess = () => !serverRoleCanAdminister(server());
   const hostUpdateCalls: HostUpdateCalls = {
     getReleaseStatus: async (serverId) =>
@@ -1608,6 +1626,34 @@ function WebWorkspaceFrame(props: WebWorkspaceProps) {
         setHostModelVisibility(hostRequest(serverId), change).pipe(Effect.mapError((error) => error.cause)),
       ),
   };
+  function hostAgentAccessPolicyCalls(serverId: string): AgentAccessPolicyCalls {
+    return {
+      serverId,
+      list: () =>
+        runTeamEffect(listAgentAccessPolicies(hostRequest(serverId)).pipe(Effect.mapError((error) => error.cause))),
+      preview: (input) =>
+        runTeamEffect(
+          previewAgentAccessPolicy(hostRequest(serverId), input).pipe(Effect.mapError((error) => error.cause)),
+        ),
+      apply: (input) =>
+        runTeamEffect(
+          applyAgentAccessPolicy(hostRequest(serverId), input).pipe(Effect.mapError((error) => error.cause)),
+        ),
+    };
+  }
+  const activeAgentAccessPolicy = createMemo(() => {
+    const host = server();
+    if (
+      host?.state !== "online" ||
+      !workspace.runtime.admin ||
+      !serverCanAdminister(host, AGENT_ACCESS_POLICY_CAPABILITY)
+    )
+      return undefined;
+    return {
+      calls: hostAgentAccessPolicyCalls(host.id),
+      onViewGroups: (trigger: HTMLElement) => void openServerSettings(host.id, trigger, "agent-groups"),
+    };
+  });
   const hostAgentAccessCalls: HostAgentAccessCalls = {
     getAgentAccess: async (serverId) =>
       runTeamEffect(getHostAgentAccess(hostRequest(serverId)).pipe(Effect.mapError((error) => error.cause))),
@@ -3255,6 +3301,14 @@ function WebWorkspaceFrame(props: WebWorkspaceProps) {
                         hostModelVisibility={{ calls: hostModelVisibilityCalls }}
                         hostDefaultProvider={{ calls: providerAdmin.hostDefaultProviderCalls }}
                         agentAccess={{ calls: hostAgentAccessCalls, listAgents: () => workspace.runtime.listAgents() }}
+                        agentAccessPolicy={(() => {
+                          const host = target();
+                          return host.state === "online" &&
+                            workspace.runtime.admin &&
+                            serverCanAdminister(host, AGENT_ACCESS_POLICY_CAPABILITY)
+                            ? hostAgentAccessPolicyCalls(host.id)
+                            : undefined;
+                        })()}
                         serverAudit={{ calls: hostServerAuditCalls, listAgents: () => workspace.runtime.listAgents() }}
                         browserProfiles={browserProfileSettings()}
                         vault={vaultSettings()}
@@ -3412,6 +3466,16 @@ function WebWorkspaceFrame(props: WebWorkspaceProps) {
               <Show when={!tasksOpen() && agentFormOpen() && !serverOnboarding()}>
                 <WebAgentSettings
                   runtime={workspace.runtime}
+                  agentAccessPolicy={activeAgentAccessPolicy()?.calls}
+                  createWithPolicy={(agent, { serverId, policyId, expectedRevision }) => {
+                    if (server()?.id !== serverId)
+                      return Promise.reject(new Error(sourceErrorText("error.agentAccessPolicy.stale")));
+                    return runTeamEffect(
+                      createAgentWithAccessPolicy(hostRequest(serverId), { agent, policyId, expectedRevision }).pipe(
+                        Effect.mapError((error) => error.cause),
+                      ),
+                    );
+                  }}
                   capabilities={workspace.state.capabilities}
                   first={firstAgent()}
                   preference={serverSetupChoice()}
@@ -3622,6 +3686,7 @@ function WebWorkspaceFrame(props: WebWorkspaceProps) {
                   }
                   onSignInProvider={composerSignIn() ? connectFromComposer : undefined}
                   onManageProviders={providerSettings() ? openProviderSettings : undefined}
+                  agentAccessPolicy={activeAgentAccessPolicy()}
                   onManageBrowserProfiles={browserProfiles() ? openBrowserProfileSettings : undefined}
                   onOpenNotificationSettings={(serverId) => openNotificationSettings(serverId)}
                   onOpenMcpSignIn={openMcpSignInFromChat()}

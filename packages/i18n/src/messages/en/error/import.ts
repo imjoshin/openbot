@@ -121,4 +121,9 @@ export const messages = defineMessages("error.import", {
   "error.import.transferPartInvalid": "Part of the transfer file did not arrive correctly. Try again.",
   "error.import.transferStepFailed": "This server did not save it.",
   "error.import.transferNoSpace": "There is not enough free disk space on the server for this transfer file.",
+  "error.import.transferAgentAccessMappingRequired":
+    "Match each MCP connection and choose an agent group before you import. If you include server settings, resolve connection conflicts before you retry.",
+  "error.import.agentAccessMappingRequired":
+    "This file contains Agent Groups permissions. Use instance transfer to keep those permissions.",
+  "error.import.transferAgentAccessReviewRequired": "Review the mapped permissions before you import.",
 });

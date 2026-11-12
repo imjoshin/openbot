@@ -25,6 +25,7 @@ import { isAvatarMimeType } from "@openbot/contracts/avatar-images";
 import { AVATAR_IMAGE_LIMITS, INPUT_LIMITS } from "@openbot/contracts/input-limits";
 import { type CreateAgentInput, type DuplicateAgentResult, WORKFLOWS_USAGE_ID } from "@openbot/contracts/ipc";
 import { TEAM_API_ROUTES } from "@openbot/contracts/team-api-routes";
+import { AGENT_ACCESS_POLICY_ROUTES } from "@openbot/contracts/team-protocol/agent-access-policy-v1";
 import { AGENT_WELCOME_CAPABILITY } from "@openbot/contracts/team-protocol/agent-welcome-v1";
 import {
   BROWSER_SECRET_VAULT_CAPABILITY,
@@ -35,12 +36,20 @@ import { V6_AGENT_MODEL } from "@openbot/contracts/team-protocol/v6-adapter";
 import { WORKFLOWS_CAPABILITY } from "@openbot/contracts/team-protocol/workflows-v1";
 import { sourceText } from "@openbot/i18n/source";
 import type { Effect } from "effect";
+import { AgentAccessPolicyFailed } from "../../backend/agent/agent-access-policy";
 import type { AgentDuplicationFailed } from "../../backend/agent/duplication-gate";
 import { ForbiddenAttentionAnswer, InactiveAttentionRequest } from "../../backend/agent/inactive-attention-request";
 import { runCauseEffect } from "../../backend/effect-boundary";
+import { parseCreateAgentWithAccessPolicy } from "../ipc/agent-access-policy-inputs";
 import { parseSidebarLayoutAction } from "../ipc/agent-inputs";
 import type { ModelVisibility } from "../model-visibility";
-import type { TeamApiAgents, TeamApiOptions, TeamApiSidebarLayout } from "./dependencies";
+import type {
+  TeamApiAgentAccessPolicy,
+  TeamApiAgents,
+  TeamApiOptions,
+  TeamApiServerAudit,
+  TeamApiSidebarLayout,
+} from "./dependencies";
 import { HttpError } from "./http-error";
 import type { RouteOutcome, TeamApiRequestContext } from "./request-context";
 import {
@@ -60,6 +69,12 @@ import {
   requireAgentLevel,
   stringField,
 } from "./request-helpers";
+import {
+  agentAccessPolicyHttpError,
+  readAgentAccessPolicyInput,
+  recordPolicyChange,
+  requireAgentAccessPolicy,
+} from "./route-agent-access-policy";
 import { routeAgentConversation } from "./route-agent-conversation";
 import { routeAgentMemories } from "./route-agent-memories";
 import { routeAgentQueue } from "./route-agent-queue";
@@ -75,11 +90,23 @@ export interface AgentRouteDependencies {
   duplicateAgent: (agentId: string, operationId: string) => Effect.Effect<DuplicateAgentResult, AgentDuplicationFailed>;
   /** `model-visibility-v1`: the models that the model picker of this server shows. */
   visibleModels?: Pick<ModelVisibility, "picker">;
+  accessPolicy?: TeamApiAgentAccessPolicy | undefined;
+  audit?: TeamApiServerAudit | undefined;
+  serverId?: string | undefined;
 }
 
 export async function routeAgents(
   context: TeamApiRequestContext,
-  { agents, skills, sidebarLayout, duplicateAgent, visibleModels }: AgentRouteDependencies,
+  {
+    agents,
+    skills,
+    sidebarLayout,
+    duplicateAgent,
+    visibleModels,
+    accessPolicy,
+    audit,
+    serverId,
+  }: AgentRouteDependencies,
 ): Promise<RouteOutcome> {
   const { method, url, request, response, member, capabilities, json, empty } = context;
   const hidden = hiddenProviderAgentIds(agents.listAgents(), context.protocol);
@@ -228,6 +255,25 @@ export async function routeAgents(
       201,
       await runCauseEffect(agents.createAgent(input, undefined, undefined, memberSender(member), welcome)),
     );
+  }
+  if (method === "POST" && url.pathname === AGENT_ACCESS_POLICY_ROUTES.createAgent) {
+    requireAgentAccessPolicy(context, accessPolicy);
+    const input = await readAgentAccessPolicyInput(context, parseCreateAgentWithAccessPolicy);
+    requireVisibleProvider(input.agent);
+    const { agent, policyId, expectedRevision } = input;
+    const welcome = capabilities.has(AGENT_WELCOME_CAPABILITY);
+    const created = await runCauseEffect(
+      agents.createAgent(agent, undefined, undefined, memberSender(member), welcome, {
+        actor: { userId: member.id, role: member.role },
+        policyId,
+        expectedRevision,
+      }),
+    ).catch((error: unknown) => {
+      if (error instanceof AgentAccessPolicyFailed) throw agentAccessPolicyHttpError(error, hidden);
+      throw error;
+    });
+    await recordPolicyChange(context, audit, serverId);
+    return json(201, created);
   }
 
   const agentMatch = url.pathname.match(/^\/v1\/agents\/([^/]+)(?:\/(.*))?$/);

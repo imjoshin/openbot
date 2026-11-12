@@ -759,4 +759,12 @@ export const messages = {
   "settings.transfer.result.signInButton": "Iniciar sesión en {provider}",
   "settings.transfer.result.notImported": "No importados",
   "settings.transfer.result.warnings": "Revisa esto",
+  "settings.transferMapping.description":
+    "Elige un grupo de destino para cada agente y un destino para cada conexión. Se conserva el acceso actual. Las demás conexiones de este servidor siguen bloqueadas.",
+  "settings.transferMapping.agents": "Grupos de destino",
+  "settings.transferMapping.connections": "Conexiones de destino",
+  "settings.transferMapping.choose": "Elegir",
+  "settings.transferMapping.review": "Revisar permisos",
+  "settings.transferMapping.import": "Importar agentes",
+  "settings.transferMapping.edit": "Cambiar asignación",
 } as const satisfies PartialTranslation<typeof source>;

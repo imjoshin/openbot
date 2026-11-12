@@ -5,6 +5,7 @@ import { dirname, join } from "node:path";
 import { BROWSER_SECRET_RESPONSE_PATH } from "@openbot/contracts/ipc";
 import { isDynamicRecord, isString } from "@openbot/contracts/runtime-values";
 import { TEAM_API_ROUTES } from "@openbot/contracts/team-api-routes";
+import { AGENT_ACCESS_POLICY_CODECS } from "@openbot/contracts/team-protocol/agent-access-policy-v1";
 import { AGENT_TASK_UI_BLOCKS_CAPABILITY } from "@openbot/contracts/team-protocol/agent-task-ui-blocks-v1";
 import { browserViewStreamSessionId } from "@openbot/contracts/team-protocol/browser-view-v1";
 import {
@@ -720,6 +721,8 @@ export class TeamWebRtcHostPeer {
           : input.body === null
             ? undefined
             : yield* remoteDecode(() => {
+                // The Team API checks the caller's role before it decodes these requests.
+                if (AGENT_ACCESS_POLICY_CODECS.has(url.pathname)) return JSON.stringify(input.body);
                 if (sideRoute)
                   return JSON.stringify(
                     sideRoute.request(input.path, input.body, {

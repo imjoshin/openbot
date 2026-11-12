@@ -43,7 +43,8 @@ export default defineConfig({
     },
   },
   preload: {
-    plugins: [externalizeDepsPlugin({ exclude: ["@openbot/contracts"] })],
+    // Policy payload decoders use Effect schemas. Sandboxed preloads cannot require external packages.
+    plugins: [externalizeDepsPlugin({ exclude: ["@openbot/contracts", "effect"] })],
     build: {
       rollupOptions: {
         input: {

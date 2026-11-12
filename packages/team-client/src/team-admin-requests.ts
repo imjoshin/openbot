@@ -1,3 +1,17 @@
+import type {
+  AgentAccessPolicyApplyResult,
+  AgentAccessPolicyMutation,
+  AgentAccessPolicyPreview,
+  AgentAccessPolicySnapshot,
+} from "@openbot/contracts/agent-access-policy";
+import {
+  type AgentAccessPolicyTransferMapping,
+  type AgentAccessPolicyTransferOptions,
+  type AgentAccessPolicyTransferPreview,
+  type AgentAccessPolicyTransferSelection,
+  decodeAgentAccessPolicyTransferOptions,
+  decodeAgentAccessPolicyTransferPreview,
+} from "@openbot/contracts/agent-access-policy-transfer";
 import {
   type AddAgentFolderInput,
   type AgentAccessChange,
@@ -15,15 +29,22 @@ import {
   type BrowseAgentFoldersInput,
   type ChatColors,
   type ClaudeCompactWindowSetting,
+  type ClientAgentSummary,
+  type CreateAgentWithAccessPolicyInput,
   type DiscordAccess,
   type DiscordRoleList,
+  decodeAgentAccessPolicyApplyResult,
+  decodeAgentAccessPolicyPreview,
+  decodeAgentAccessPolicySnapshot,
   decodeAgentAccessSnapshot,
+  decodeAgentCreatedWithAccessPolicy,
   decodeAgentExclusionChangeFromMain,
   decodeAgentFolderBrowse,
   decodeAgentFolderChangeFromMain,
   decodeAgentFolderListFromMain,
   decodeHostWhatsAppLinkState,
   decodeHostWhatsAppOverview,
+  decodeRemoteInstanceTransferResult,
   decodeServerAuditLog,
   type HiddenAgentsSnapshot,
   type HostDiscordAccessInput,
@@ -38,6 +59,7 @@ import {
   isSidebarPinsSnapshot,
   isWhatsAppGroupList,
   type MessagingWorkspaceInput,
+  type RemoteInstanceTransferResult,
   type RemoveWhatsAppSenderInput,
   type ResetAgentSessionSettingInput,
   type ServerAuditLog,
@@ -57,6 +79,7 @@ import {
   type WhatsAppOverview,
   type WhatsAppSenderInput,
 } from "@openbot/contracts/ipc";
+import { AGENT_ACCESS_POLICY_ROUTES } from "@openbot/contracts/team-protocol/agent-access-policy-v1";
 import { AGENT_ACCESS_ROUTES } from "@openbot/contracts/team-protocol/agent-access-v1";
 import { AGENT_COLORS_ROUTES } from "@openbot/contracts/team-protocol/agent-colors-v1";
 import { AGENT_FOLDERS_ROUTES } from "@openbot/contracts/team-protocol/agent-folders-v1";
@@ -931,6 +954,95 @@ export function setHostBrowsingMemory(
 /** The roles of the host (`agent-access-v1`). A member reads only `mine`. */
 export function getHostAgentAccess(request: TeamApiRequest): Effect.Effect<AgentAccessSnapshot, TeamAdminRequestError> {
   return adminCall(() => request("POST", AGENT_ACCESS_ROUTES.read, decodeAgentAccessSnapshot, {}));
+}
+
+export function listAgentAccessPolicies(
+  request: TeamApiRequest,
+): Effect.Effect<AgentAccessPolicySnapshot, TeamAdminRequestError> {
+  return adminCall(() => request("POST", AGENT_ACCESS_POLICY_ROUTES.list, decodeAgentAccessPolicySnapshot, {}));
+}
+
+export function previewAgentAccessPolicy(
+  request: TeamApiRequest,
+  input: AgentAccessPolicyMutation,
+): Effect.Effect<AgentAccessPolicyPreview, TeamAdminRequestError> {
+  return adminCall(() =>
+    request("POST", AGENT_ACCESS_POLICY_ROUTES.preview, decodeAgentAccessPolicyPreview, policyMutationBody(input)),
+  );
+}
+
+export function applyAgentAccessPolicy(
+  request: TeamApiRequest,
+  input: AgentAccessPolicyMutation,
+): Effect.Effect<AgentAccessPolicyApplyResult, TeamAdminRequestError> {
+  return adminCall(() =>
+    request("POST", AGENT_ACCESS_POLICY_ROUTES.apply, decodeAgentAccessPolicyApplyResult, policyMutationBody(input)),
+  );
+}
+
+function policyMutationBody(input: AgentAccessPolicyMutation) {
+  if (input.kind !== "savePolicy") return { ...input };
+  return { ...input, assignments: [...input.assignments] };
+}
+
+export function createAgentWithAccessPolicy(
+  request: TeamApiRequest,
+  input: CreateAgentWithAccessPolicyInput,
+): Effect.Effect<ClientAgentSummary, TeamAdminRequestError> {
+  return adminCall(() =>
+    request("POST", AGENT_ACCESS_POLICY_ROUTES.createAgent, decodeAgentCreatedWithAccessPolicy, {
+      ...input,
+      agent: { ...input.agent },
+    }),
+  );
+}
+
+export function getTransferMapping(
+  request: TeamApiRequest,
+  input: AgentAccessPolicyTransferSelection,
+): Effect.Effect<AgentAccessPolicyTransferOptions | null, TeamAdminRequestError> {
+  return adminCall(() =>
+    request("POST", AGENT_ACCESS_POLICY_ROUTES.getTransferMapping, decodeAgentAccessPolicyTransferOptions, {
+      token: input.token,
+      keys: [...input.keys],
+    }),
+  );
+}
+
+function transferMappingBody(input: AgentAccessPolicyTransferMapping) {
+  return {
+    ...input,
+    keys: [...input.keys],
+    agentMappings: [...input.agentMappings],
+    connectionMappings: [...input.connectionMappings],
+  };
+}
+
+export function previewTransferMapping(
+  request: TeamApiRequest,
+  input: AgentAccessPolicyTransferMapping,
+): Effect.Effect<AgentAccessPolicyTransferPreview, TeamAdminRequestError> {
+  return adminCall(() =>
+    request(
+      "POST",
+      AGENT_ACCESS_POLICY_ROUTES.previewTransferMapping,
+      decodeAgentAccessPolicyTransferPreview,
+      transferMappingBody(input),
+    ),
+  );
+}
+
+export function applyTransferMapping(
+  request: TeamApiRequest,
+  input: AgentAccessPolicyTransferMapping,
+  timezone: string,
+): Effect.Effect<RemoteInstanceTransferResult, TeamAdminRequestError> {
+  return adminCall(() =>
+    request("POST", AGENT_ACCESS_POLICY_ROUTES.applyTransferMapping, decodeRemoteInstanceTransferResult, {
+      ...transferMappingBody(input),
+      timezone,
+    }),
+  );
 }
 
 /** The changes to the access of the host, newest first (`server-audit-v1`). Owners and admins only. */

@@ -1531,6 +1531,19 @@ the message until the server connects again.
 
 ## Agent access
 
+Agent Groups control each agent's access to OpenBot-managed MCP connections. Group names,
+connection choices, membership, and individual overrides stay in the host's SQLite database.
+Owners and admins can read and change them through the encrypted host connection on desktop,
+web, and mobile. These responses include agent names, connection names, and available account
+labels, but no connection credentials. The phone does not add this policy data to its offline
+workspace copy. The server audit log records a permission change and its human actor, with no
+credentials or tool arguments.
+
+Supported transfer files include the policy metadata needed to preserve these permissions.
+An individual restricted import requires a choice of destination groups and connection IDs.
+Agent Groups do not separate chat history, files, browser sign-ins, Vault data, direct commands,
+network access, or messages between agents. Computer Use keeps its separate setting.
+
 Agents currently use `danger-full-access` with `approvalPolicy: never`. They can read and modify local
 files, run programs, use the network, and control the embedded browser without an OpenBot confirmation
 dialog. This is an explicit product behavior, not a host security boundary. Keep backups and do not

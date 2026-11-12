@@ -427,7 +427,7 @@ export const messages = {
   "server.settings.browsingMemoryDescription":
     "عندما تتحكم في متصفح الوكيل، يتعلّم الوكيل كيف تعمل المواقع من الصفحات والأزرار التي تستخدمها. لا يُحفظ النص الذي تكتبه.",
   "server.settings.browsingMemoryLoadFailed": "تعذّر تحميل إعداد التصفّح.",
-  "server.settings.rolesTitle": "الأذونات",
+  "server.settings.rolesTitle": "الأدوار",
   "server.settings.rolesDescription":
     "اختر الوكلاء الذين يمكن للأعضاء استخدامهم. يحصل العضو على أعلى وصول من «الجميع» ومن أدواره. يمكن للمالكين والمسؤولين استخدام كل الوكلاء.",
   "server.settings.auditTitle": "سجل التدقيق",

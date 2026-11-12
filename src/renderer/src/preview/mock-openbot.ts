@@ -212,6 +212,7 @@ import {
   STORY_USAGE,
   withStoryForeignProvider,
 } from "./fixtures";
+import { createMockAgentAccessPolicy } from "./mock-agent-access-policy";
 import { mockAgentAnalytics, mockHostAnalytics } from "./mock-agent-analytics";
 import { createMockAuth, type MockAuthOptions } from "./mock-auth";
 import { createMockBilling, previewBillingServers } from "./mock-billing";
@@ -1212,7 +1213,30 @@ export function createMockOpenBot(options: MockOpenBotOptions = {}): MockOpenBot
   );
   const billingPlans = previewBillingServers();
 
-  async function createMockAgent(input: CreateAgentInput, welcome: boolean): Promise<ClientAgentSummary> {
+  const accessPoliciesByServer = new Map<string, ReturnType<typeof createMockAgentAccessPolicy>>();
+  function mockAccessPolicies(serverId: string) {
+    const current = accessPoliciesByServer.get(serverId);
+    if (current) return current;
+    const policies = createMockAgentAccessPolicy(
+      serverId,
+      () => agents,
+      () =>
+        mcpServers.map((server) => ({
+          id: server.id,
+          name: server.name,
+          accountLabel: null,
+          available: server.enabled !== false,
+        })),
+    );
+    accessPoliciesByServer.set(serverId, policies);
+    return policies;
+  }
+
+  async function createMockAgent(
+    input: CreateAgentInput,
+    welcome: boolean,
+    beforeStart?: (agentId: string) => void,
+  ): Promise<ClientAgentSummary> {
     const agent = createAgentSummary({
       name: input.name,
       title: "",
@@ -1224,6 +1248,7 @@ export function createMockOpenBot(options: MockOpenBotOptions = {}): MockOpenBot
       ...(input.reasoningEffort === undefined ? {} : { reasoningEffort: input.reasoningEffort }),
     });
     if (input.provider && input.model && input.providerAccountId) agent.providerAccountId = input.providerAccountId;
+    beforeStart?.(agent.id);
     agents = [...agents, agent];
     queues.set(agent.id, emptyQueue(agent.id));
     emitAgentEvent({ type: "agents-changed", agents });
@@ -1247,6 +1272,22 @@ export function createMockOpenBot(options: MockOpenBotOptions = {}): MockOpenBot
   }
 
   const api: OpenBotDesktopApi = {
+    agentAccessPolicy: {
+      getTransferMapping: async () => null,
+      previewTransferMapping: async () => {
+        throw new Error(sourceText("error.import.transferAgentAccessMappingRequired"));
+      },
+      applyTransferMapping: async () => {
+        throw new Error(sourceText("error.import.transferAgentAccessMappingRequired"));
+      },
+      list: (serverId) => mockAccessPolicies(serverId).list(),
+      preview: (input, serverId) => mockAccessPolicies(serverId).preview(input),
+      apply: (input, serverId) => mockAccessPolicies(serverId).apply(input),
+      createAgent: ({ agent, policyId, expectedRevision }, serverId) =>
+        createMockAgent(agent, true, (id) =>
+          mockAccessPolicies(serverId).assignCreated(id, policyId, expectedRevision),
+        ),
+    },
     getAppInfo: async () => clone(appInfo),
     getSetupState: async () => clone(setupState),
     saveSetup: async ({ preferredProvider, preferredModel }) => {
@@ -2526,7 +2567,7 @@ export function createMockOpenBot(options: MockOpenBotOptions = {}): MockOpenBot
       },
       // The renderer's create sends a setup message; a saved profile sends a visible first message.
       createAgent: (input) => createMockAgent(input, true),
-      duplicateAgent: async (agentId) => {
+      duplicateAgent: async (agentId, serverId) => {
         const source = agents.find((agent) => agent.id === agentId);
         if (!source) throw new Error("Agent not found");
         // The copy gets a new id and its own workspace, so neither is passed on.
@@ -2544,6 +2585,7 @@ export function createMockOpenBot(options: MockOpenBotOptions = {}): MockOpenBot
             : { ownBrowserSession: true, browserProfileId: source.browserProfileId }),
           threadId: null,
         };
+        mockAccessPolicies(serverId ?? "local").copyAgentAccess(agentId, agent.id);
         agents = [...agents, agent];
         queues.set(agent.id, emptyQueue(agent.id));
         snapshots[agent.id] = {

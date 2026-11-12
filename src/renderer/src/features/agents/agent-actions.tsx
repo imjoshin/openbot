@@ -1,5 +1,6 @@
 import type { ClientAgentSummary } from "@openbot/contracts/ipc";
 import { AGENT_WELCOME_CAPABILITY, TEAM_AGENT_CREATE_MODEL_CAPABILITY } from "@openbot/contracts/team-protocol/current";
+import { sourceText } from "@openbot/i18n/source";
 import { classifyFailure } from "@openbot/telemetry";
 import { toast } from "@openbot/ui";
 import type { AgentProfile } from "@openbot/ui/data";
@@ -20,6 +21,7 @@ import { useAgentThreads } from "../agent-threads/agent-threads-context";
 import { useConversation } from "../conversation/conversation-context";
 import { agentConversationKey } from "../conversation/conversation-keys";
 import { useDirectMessages } from "../conversation/direct-messages-context";
+import { agentAccessPolicyPort } from "../servers/agent-access-policy-port";
 import { useServers } from "../servers/servers-context";
 import { useSidebar } from "../sidebar/sidebar-context";
 import { type NewAgentDraft, newAgentInput } from "./agent-create-input";
@@ -82,11 +84,18 @@ const AgentActions = createSimpleContext({
     const [duplicatingSectionIds, setDuplicatingSectionIds] = createSignal<Set<string>>(new Set());
 
     /** Asks the host for the agent. */
-    function requestNewAgent(draft: NewAgentDraft) {
+    function requestNewAgent(draft: NewAgentDraft & Pick<FirstAgentDraft, "accessPolicy">) {
       const local = activeServer()?.kind !== "remote";
       const createModelSupported = local || activeServerSupportsCapability(TEAM_AGENT_CREATE_MODEL_CAPABILITY);
       const welcomeSupported = local || activeServerSupportsCapability(AGENT_WELCOME_CAPABILITY);
-      return agentsPort().agent.createAgent(newAgentInput(draft, createModelSupported, welcomeSupported));
+      const agent = newAgentInput(draft, createModelSupported, welcomeSupported);
+      const policy = draft.accessPolicy;
+      if (!policy) return agentsPort().agent.createAgent(agent);
+      if (policy.serverId !== activeServerId()) throw new Error(sourceText("error.agentAccessPolicy.stale"));
+      return agentAccessPolicyPort().createAgent(
+        { agent, policyId: policy.policyId, expectedRevision: policy.expectedRevision },
+        policy.serverId,
+      );
     }
 
     /** Synchronous, so a caller that also selects the agent does both in the same update. */

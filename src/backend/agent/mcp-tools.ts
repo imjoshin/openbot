@@ -53,7 +53,7 @@ const saveMcpServerToolSchema = z.strictObject({
 const namedServerSchema = z.strictObject({ name: serverName });
 const setEnabledSchema = z.strictObject({ name: serverName, enabled: z.boolean() });
 
-const MCP_SCOPE = "Every agent on this OpenBot server gets the tools of an enabled MCP server.";
+const MCP_SCOPE = "Agent permissions control which agents get the tools of this MCP server.";
 const MCP_APPROVAL =
   "The user's request is the permission: call the tool without asking first. OpenBot asks the user to approve when your access needs it.";
 
@@ -103,6 +103,7 @@ export interface AgentMcpServers {
   save(config: McpServerConfig): Effect.Effect<unknown, ToolOperationFailed>;
   setEnabled(mcpServerId: string, enabled: boolean): Effect.Effect<unknown, ToolOperationFailed>;
   remove(mcpServerId: string): Effect.Effect<unknown, ToolOperationFailed>;
+  mayInspect?(config: McpServerConfig): boolean;
   /**
    * A silent test: stored sign-ins only, never a browser. `tested`: the agent asked for this test,
    * so a saved server with new tools refreshes the sessions.
@@ -121,23 +122,49 @@ export interface AgentMcpServers {
 export function mcpServersFromGateway(
   gateway: McpGateway,
   prepareTest?: (config: McpServerConfig) => Effect.Effect<void, unknown>,
+  policy?: { permits(id: string): boolean; allows(id: string): boolean; allowsNew(): boolean },
 ): AgentMcpServers {
   const toToolFailure = Effect.mapError(
     (failure: McpGatewayFailed) => new ToolOperationFailed({ cause: failure.cause }),
   );
+  const deny = () =>
+    new ToolOperationFailed({ cause: new Error(sourceText("error.agentAccessPolicy.connectionDenied")) });
+  const permitted = (id: string) => policy?.permits(id) ?? true;
+  const allowed = (id: string) => policy?.allows(id) ?? true;
+  const mayEdit = (config: McpServerConfig) =>
+    !policy || (gateway.agentDraftMayUseAddress(config) && (!config.id || permitted(config.id)));
+  const mayInspect = (config: McpServerConfig) =>
+    !policy ||
+    (mayEdit(config) &&
+      config.enabled &&
+      (config.id ? allowed(config.id) || gateway.needsOAuth(config) : policy.allowsNew()));
   return {
-    list: () => gateway.list(),
-    builtIn: () => gateway.builtIn(),
-    signIns: () => gateway.signIns(),
-    save: (config) => gateway.save({ config }).pipe(toToolFailure),
-    setEnabled: (mcpServerId, enabled) => gateway.setEnabled({ mcpServerId, enabled }).pipe(toToolFailure),
-    remove: (mcpServerId) => gateway.remove({ mcpServerId }).pipe(toToolFailure),
-    inspect: (config, tested) =>
-      (prepareTest?.(config) ?? Effect.void).pipe(
-        Effect.mapError((cause) => new ToolOperationFailed({ cause })),
-        Effect.andThen(gateway.inspect(config, tested).pipe(toToolFailure)),
+    list: () => gateway.list().filter(({ id }) => permitted(id)),
+    builtIn: () => gateway.builtIn().filter(({ id }) => allowed(id)),
+    signIns: () => gateway.signIns().filter(({ mcpServerId }) => permitted(mcpServerId)),
+    save: (config) => Effect.suspend(() => (mayEdit(config) ? gateway.save({ config }).pipe(toToolFailure) : deny())),
+    setEnabled: (mcpServerId, enabled) =>
+      Effect.suspend(() =>
+        permitted(mcpServerId) ? gateway.setEnabled({ mcpServerId, enabled }).pipe(toToolFailure) : deny(),
       ),
-    offersSignIn: (config) => gateway.offersSignIn(config),
+    remove: (mcpServerId) =>
+      Effect.suspend(() => (permitted(mcpServerId) ? gateway.remove({ mcpServerId }).pipe(toToolFailure) : deny())),
+    mayInspect,
+    inspect: (config, tested) =>
+      Effect.suspend(() =>
+        !mayInspect(config)
+          ? deny()
+          : (prepareTest?.(config) ?? Effect.void).pipe(
+              Effect.mapError((cause) => new ToolOperationFailed({ cause })),
+              Effect.andThen(
+                Effect.suspend(() =>
+                  mayInspect(config) ? gateway.inspect(config, tested).pipe(toToolFailure) : deny(),
+                ),
+              ),
+            ),
+      ),
+    offersSignIn: (config) =>
+      Effect.suspend(() => (mayEdit(config) ? gateway.offersSignIn(config) : Effect.succeed(false))),
     redact: (text) => gateway.redact(text),
   };
 }
@@ -271,6 +298,11 @@ const runMcpServerTool = Effect.fn("McpServerTools.handle")(function* (
       const reason = servers.redact(sourceText(key, { name: config.name, target: serverTarget(config) }));
       if (!(yield* call.approve(reason, config.transport === "stdio" ? config.workingDirectory || null : null)))
         return openBotToolFailure(sourceText("error.agent.mcpServerDeclined"));
+      const savedWithoutAccess = () => openBotToolResult({ name: config.name, status: "saved_without_access" });
+      if (servers.mayInspect?.(config) === false) {
+        yield* servers.save(config);
+        return savedWithoutAccess();
+      }
       // A server that does not answer is not saved, so no agent is given a broken entry. A server that
       // needs a sign-in or a key is saved: the sign-in and the key belong to a saved row.
       const outcome = yield* servers.inspect(config);
@@ -279,6 +311,7 @@ const runMcpServerTool = Effect.fn("McpServerTools.handle")(function* (
           servers.redact(sourceText("error.agent.mcpServerNotSaved", { error: outcome.error })),
         );
       yield* servers.save(config);
+      if (!servers.list().some(({ name }) => name === config.name)) return savedWithoutAccess();
       return yield* report(servers, call, config, outcome, true);
     }
     case "set_mcp_server_enabled": {

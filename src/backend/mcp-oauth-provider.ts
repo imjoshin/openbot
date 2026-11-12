@@ -115,6 +115,8 @@ export const mcpOAuthRecordSchema = z.object({
    * and a removal clear it. Older builds strip the field when they read the file.
    */
   lostAt: z.number().optional(),
+  /** The user ended this sign-in. Keeps the saved connection unavailable until sign-in succeeds. */
+  signedOutAt: z.number().optional(),
 });
 
 export type McpOAuthRecord = z.infer<typeof mcpOAuthRecordSchema>;
@@ -603,7 +605,7 @@ export class McpOAuth implements McpOAuthAuthority {
   hasSignIn(url: string): boolean {
     const key = mcpOAuthAccountKey(url);
     const record = key === null ? undefined : this.#options.storage.read(key);
-    return record?.tokens !== undefined || record?.lostAt !== undefined;
+    return record?.tokens !== undefined || record?.lostAt !== undefined || record?.signedOutAt !== undefined;
   }
 
   /**
@@ -653,8 +655,7 @@ export class McpOAuth implements McpOAuthAuthority {
     const record = this.#options.storage.read(key);
     const app = record?.app;
     this.#invalidate(key);
-    if (app) yield* this.#options.storage.write(key, { app });
-    else yield* this.#options.storage.clear(key);
+    if (record) yield* this.#options.storage.write(key, { ...(app ? { app } : {}), signedOutAt: Date.now() });
     yield* this.#revoke(key, record);
   }).bind(this);
 
@@ -1161,7 +1162,13 @@ class McpOAuthClientProvider implements OAuthClientProvider {
       Effect.gen({ self: this }, function* () {
         this.#recordTokens(tokens);
         const client = this.#registeredClient;
-        yield* this.#save({ ...(client ? { client } : {}), tokens, obtainedAt: Date.now(), lostAt: undefined });
+        yield* this.#save({
+          ...(client ? { client } : {}),
+          tokens,
+          obtainedAt: Date.now(),
+          lostAt: undefined,
+          signedOutAt: undefined,
+        });
         this.#registeredClient = undefined;
       }),
     );

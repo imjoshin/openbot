@@ -9,14 +9,22 @@
 // Writes .openbot-build/agent-access-e2e/report.json.
 
 import assert from "node:assert/strict";
+import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import type { AgentAccessPolicyMutation } from "@openbot/contracts/agent-access-policy";
 import {
   type AgentAccessChange,
   type AgentAccessSnapshot,
+  type CreateAgentWithAccessPolicyInput,
+  decodeAgentAccessPolicyApplyResult,
+  decodeAgentAccessPolicyPreview,
+  decodeAgentAccessPolicySnapshot,
   decodeAgentAccessSnapshot,
+  decodeAgentCreatedWithAccessPolicy,
   decodeServerAuditLog,
   type ServerAuditLog,
 } from "@openbot/contracts/ipc";
@@ -27,6 +35,11 @@ import {
   TEAM_PROTOCOL_V1_WEBSOCKET,
   TEAM_PROTOCOL_VERSION_HEADER,
 } from "@openbot/contracts/team-protocol";
+import {
+  AGENT_ACCESS_POLICY_CAPABILITY,
+  AGENT_ACCESS_POLICY_CODECS,
+  AGENT_ACCESS_POLICY_ROUTES,
+} from "@openbot/contracts/team-protocol/agent-access-policy-v1";
 import {
   AGENT_ACCESS_CAPABILITY,
   AGENT_ACCESS_CODECS,
@@ -43,8 +56,10 @@ import {
 } from "@openbot/contracts/team-protocol/server-audit-v1";
 import { STORAGE_ROUTES } from "@openbot/contracts/team-protocol/storage-v1";
 import { TEAM_PROTOCOL_V7 } from "@openbot/contracts/team-protocol/v7";
+import { TEAM_PROTOCOL_V8 } from "@openbot/contracts/team-protocol/v8";
 import { TEAM_PROTOCOL_V9 } from "@openbot/contracts/team-protocol/v9";
 import { sourceText } from "@openbot/i18n/source";
+import { redactText } from "@openbot/logging";
 import { plugin } from "bun";
 import { Effect } from "effect";
 import type { AgentBrowserHost } from "../src/backend/agent/turn-lifecycle";
@@ -52,9 +67,13 @@ import { AgentService } from "../src/backend/agent-service";
 import { AgentStore } from "../src/backend/agent-store";
 import { runCauseEffect } from "../src/backend/effect-boundary";
 import { MailboxStore } from "../src/backend/mailbox-store";
+import { mcpOAuthProxyAgentKey } from "../src/backend/mcp-oauth-proxy";
 import { OpenBotDatabase } from "../src/backend/openbot-database";
 import { SidebarLayoutStore } from "../src/backend/sidebar-layout-store";
 import { StorageUsageScanner, StorageUsageService } from "../src/backend/storage-usage";
+import { GitHubConnectorService } from "../src/main/github-connector-service";
+import { GitHubConnectorStore } from "../src/main/github-connector-store";
+import { GitHubMcpProxy } from "../src/main/github-mcp-proxy";
 import type { TeamApiBrowser } from "../src/main/team-api/dependencies";
 
 const OUT = resolve(import.meta.dirname, "../.openbot-build/agent-access-e2e");
@@ -270,6 +289,7 @@ async function startHost(): Promise<Host> {
     appVersion: HOST_VERSION,
     hiddenAgents: agents,
     agentAccess: access,
+    agentAccessPolicy: agents.agentAccessPolicy,
     serverAudit: audit,
     storage,
   });
@@ -333,6 +353,19 @@ async function readAccess(token: string): Promise<AgentAccessSnapshot> {
 
 async function setAccess(token: string, change: AgentAccessChange) {
   return access(AGENT_ACCESS_ROUTES.set, token, change);
+}
+
+async function agentGroups(
+  path: string,
+  token: string,
+  input: AgentAccessPolicyMutation | CreateAgentWithAccessPolicyInput | Record<string, never>,
+  protocol: number = TEAM_PROTOCOL_V9,
+  capabilities: readonly string[] = teamCapabilitiesForProtocol(protocol),
+) {
+  const codec = AGENT_ACCESS_POLICY_CODECS.get(path);
+  assert.ok(codec, `No agent-access-policy-v1 codec for ${path}.`);
+  const response = await call("POST", path, { token, body: codec.request(input), protocol, capabilities });
+  return { status: response.status, body: codec.response(response.status, response.body) };
 }
 
 /**
@@ -801,12 +834,281 @@ try {
     return { copy: stored.everyone[copy], role: stored.roles[0]?.agents[copy] };
   });
 
+  await step("Agent Groups: negotiate v9, check owner access and keep metadata from members", async () => {
+    const routes = AGENT_ACCESS_POLICY_ROUTES;
+    const owner = await agentGroups(routes.list, ownerToken, {});
+    assert.equal(owner.status, 200);
+    const snapshot = decodeAgentAccessPolicySnapshot(owner.body);
+    assert.equal(snapshot.policies.length, 0);
+    const member = await agentGroups(routes.list, setup.memberToken, {});
+    assert.equal(member.status, 403);
+    assert.deepEqual(Object.keys(record(member.body, "member refusal")), ["error"]);
+    assert.equal(
+      (await agentGroups(routes.list, ownerToken, {}, TEAM_PROTOCOL_V8, [AGENT_ACCESS_POLICY_CAPABILITY])).status,
+      400,
+    );
+    assert.equal((await agentGroups(routes.list, ownerToken, {}, TEAM_PROTOCOL_V9, [])).status, 400);
+    await runCauseEffect(current().team.updateMember(setup.memberId, { role: "admin" }));
+    const admin = await agentGroups(routes.list, setup.memberToken, {});
+    assert.equal(admin.status, 200);
+    await runCauseEffect(current().team.updateMember(setup.memberId, { role: "member" }));
+    return { agents: snapshot.agents.length, admin: admin.status, member: member.status };
+  });
+
+  await step("Agent Groups: preview, save, reject a stale revision and preserve grants on a legacy edit", async () => {
+    const routes = AGENT_ACCESS_POLICY_ROUTES;
+    const { agents } = current();
+    const servers = await runCauseEffect(
+      agents.saveMcpServer({
+        config: {
+          id: "",
+          name: "Private connection",
+          transport: "http",
+          enabled: false,
+          command: "",
+          args: [],
+          env: [],
+          envPassthrough: [],
+          workingDirectory: "",
+          url: "http://127.0.0.1:9/mcp",
+          headers: [],
+        },
+      }),
+    );
+    const server = servers.find(({ name }) => name === "Private connection");
+    assert.ok(server);
+    const snapshot = decodeAgentAccessPolicySnapshot((await agentGroups(routes.list, ownerToken, {})).body);
+    const mutation: AgentAccessPolicyMutation = {
+      kind: "savePolicy",
+      expectedRevision: snapshot.revision,
+      policyId: null,
+      name: "Restricted",
+      allowNewConnections: false,
+      choices: { [server.id]: false },
+      assignments: [{ agentId: general, assigned: true, keepOverrides: false }],
+    };
+    const refused = await agentGroups(routes.apply, setup.memberToken, mutation);
+    assert.equal(refused.status, 403);
+    const badBody = { ...mutation, expectedRevision: -1 };
+    const malformed = await call("POST", routes.apply, {
+      token: ownerToken,
+      body: badBody,
+      protocol: TEAM_PROTOCOL_V9,
+    });
+    assert.equal(malformed.status, 400);
+    assert.equal(record(malformed.body, "policy protocol error").code, "protocol_error");
+    const denied = await call("POST", routes.apply, {
+      token: setup.memberToken,
+      body: badBody,
+      protocol: TEAM_PROTOCOL_V9,
+    });
+    assert.equal(denied.status, 403);
+    const preview = await agentGroups(routes.preview, ownerToken, mutation);
+    assert.equal(preview.status, 200);
+    assert.equal(decodeAgentAccessPolicyPreview(preview.body).revision, snapshot.revision);
+    const saved = await agentGroups(routes.apply, ownerToken, mutation);
+    assert.equal(saved.status, 200);
+    const result = decodeAgentAccessPolicyApplyResult(saved.body);
+    assert.equal(result.status, "saved");
+    const policyId = result.snapshot.policies.find(({ name }) => name === "Restricted")?.id;
+    assert.ok(policyId);
+    assert.equal((await agentGroups(routes.apply, ownerToken, mutation)).status, 409);
+
+    const create = {
+      agent: { name: "New agent", description: "", avatarSeed: "new-agent", avatarHue: null, initialMessage: "Hello" },
+      policyId,
+      expectedRevision: snapshot.revision,
+    };
+    assert.equal((await agentGroups(routes.createAgent, ownerToken, create)).status, 409);
+    assert.equal((await agentGroups(routes.createAgent, setup.memberToken, create)).status, 403);
+    const createCodec = AGENT_ACCESS_POLICY_CODECS.get(routes.createAgent);
+    assert.ok(createCodec);
+    const summary = agents.listAgents().find(({ id }) => id === general);
+    assert.ok(summary);
+    assert.equal(decodeAgentCreatedWithAccessPolicy(createCodec.response(201, summary)).id, general);
+
+    const edited = await call("PATCH", TEAM_API_ROUTES.agent.one(general), {
+      token: setup.memberToken,
+      protocol: TEAM_PROTOCOL_V8,
+      body: { name: "General renamed", mcpAccessPolicyId: null },
+    });
+    assert.equal(edited.status, 200);
+    const updated = decodeAgentAccessPolicySnapshot((await agentGroups(routes.list, ownerToken, {})).body);
+    const agent = updated.agents.find(({ id }) => id === general);
+    assert.equal(agent?.name, "General renamed");
+    assert.equal(agent?.policyId, policyId);
+    assert.equal(agent?.connections.find(({ connectionId }) => connectionId === server.id)?.allowed, false);
+    const { log } = await readAudit(ownerToken);
+    assert.ok(log?.entries.some(({ change }) => change.kind === "agent-access-policy"));
+    return { policyId, legacyEdit: edited.status, grant: false, audit: true };
+  });
+
+  await step("Agent Groups: a revoked GitHub proxy route rejects its old bearer", async () => {
+    const agentKey = "a".repeat(32);
+    let allowed = true;
+    let tokenReads = 0;
+    const proxy = new GitHubMcpProxy({
+      upstreamUrl: "http://127.0.0.1:9/mcp",
+      secret: () => "test-github-proxy-secret",
+      allowsAgentKey: (key) => key === agentKey && allowed,
+      userToken: () =>
+        Effect.sync(() => {
+          tokenReads++;
+          return null;
+        }),
+      botToken: () => null,
+      canRead: () => Effect.succeed(null),
+      refused: () => Effect.void,
+    });
+    await runCauseEffect(proxy.start(null));
+    try {
+      const url = proxy.url(agentKey);
+      const legacyUrl = proxy.url();
+      assert.ok(url && legacyUrl);
+      const bearer = proxy.bearer(agentKey);
+      const callProxy = (target: string, token: string) =>
+        fetch(target, {
+          method: "POST",
+          headers: { authorization: `Bearer ${token}` },
+        });
+      const disconnected = await callProxy(url, bearer);
+      assert.equal(disconnected.status, 503);
+      await disconnected.text();
+      allowed = false;
+      const denied = await callProxy(url, bearer);
+      assert.equal(denied.status, 401);
+      await denied.text();
+      const legacy = await callProxy(legacyUrl, proxy.bearer());
+      assert.equal(legacy.status, 401);
+      await legacy.text();
+      assert.equal(tokenReads, 1);
+      return { disconnected: disconnected.status, revoked: denied.status, legacy: legacy.status };
+    } finally {
+      await Effect.runPromise(proxy.stop());
+    }
+  });
+
+  await step("Agent Groups: GitHub bindings survive restart and rotate when the old port is occupied", async () => {
+    const path = join(root, "github-test-sign-in.json");
+    const key = randomBytes(32);
+    const cipher = {
+      encrypt(value: string) {
+        const nonce = randomBytes(12);
+        const aes = createCipheriv("aes-256-gcm", key, nonce);
+        const ciphertext = Buffer.concat([aes.update(value, "utf8"), aes.final()]);
+        return Buffer.concat([nonce, aes.getAuthTag(), ciphertext]);
+      },
+      decrypt(value: Buffer) {
+        const aes = createDecipheriv("aes-256-gcm", key, value.subarray(0, 12));
+        aes.setAuthTag(value.subarray(12, 28));
+        return Buffer.concat([aes.update(value.subarray(28)), aes.final()]).toString("utf8");
+      },
+    };
+    const userToken = randomBytes(32).toString("base64url");
+    await runCauseEffect(
+      new GitHubConnectorStore(path, cipher).write({
+        accessToken: userToken,
+        accessTokenExpiresAt: null,
+        refreshToken: null,
+        refreshTokenExpiresAt: null,
+        login: "fixture-user",
+        userId: 1,
+        avatarUrl: null,
+      }),
+    );
+    const agentId = "fixture-agent";
+    const otherAgentId = "fixture-other-agent";
+    const allowed = new Set([mcpOAuthProxyAgentKey(agentId), mcpOAuthProxyAgentKey(otherAgentId)]);
+    const start = async () => {
+      const service = new GitHubConnectorService({
+        app: { clientId: "fixture-client-id", slug: "fixture-app" },
+        store: new GitHubConnectorStore(path, cipher),
+        toolDirectory: join(root, "github-test-tools"),
+        apiUrl: "https://fixture.invalid",
+        openExternal: async () => {},
+        fetch: async () => new Response(null, { status: 503 }),
+        allowsMcpAgentKey: (id) => allowed.has(id),
+      });
+      await runCauseEffect(service.load());
+      return service;
+    };
+    const binding = async (service: GitHubConnectorService, id: string) => {
+      const url = service.mcpServer(id)?.url;
+      const bearer = await runCauseEffect(service.mcpAuthorization(id));
+      const bindingId = service.mcpBindingId();
+      assert.ok(url && bearer && bindingId, "The test connection has no scoped binding.");
+      return { url, bearer, bindingId };
+    };
+    const status = async (url: string, bearer: string) => {
+      // A valid bearer reaches the method check. GET cannot contact GitHub.
+      const response = await fetch(url, { headers: { authorization: `Bearer ${bearer}` } });
+      await response.text();
+      return response.status;
+    };
+
+    let connector = await start();
+    const listener = createServer();
+    try {
+      const first = await binding(connector, agentId);
+      const second = await binding(connector, otherAgentId);
+      assert.ok(first.url !== second.url && first.bearer !== second.bearer, "The agents share a scoped binding.");
+      assert.equal(await status(first.url, second.bearer), 401);
+      assert.equal(await status(first.url, first.bearer), 405);
+      assert.ok(!redactText(`fixture ${first.bearer}`).includes(first.bearer), "The scoped bearer was not redacted.");
+      const sealed = await readFile(path, "utf8");
+      assert.ok(!sealed.includes(first.bindingId) && !sealed.includes(userToken), "The store exposed sign-in data.");
+      await runCauseEffect(connector.dispose());
+      connector = await start();
+      const resumed = await binding(connector, agentId);
+      assert.ok(
+        resumed.url === first.url && resumed.bearer === first.bearer && resumed.bindingId === first.bindingId,
+        "The restart changed the binding on the same port.",
+      );
+      allowed.delete(mcpOAuthProxyAgentKey(agentId));
+      assert.equal(await status(first.url, first.bearer), 401);
+      await runCauseEffect(connector.dispose());
+      const oldPort = Number(new URL(first.url).port);
+      await new Promise<void>((ready, reject) => {
+        listener.once("error", reject);
+        listener.listen(oldPort, "127.0.0.1", ready);
+      });
+      connector = await start();
+      allowed.add(mcpOAuthProxyAgentKey(agentId));
+      const replaced = await binding(connector, agentId);
+      assert.ok(
+        replaced.url !== first.url && replaced.bearer !== first.bearer && replaced.bindingId !== first.bindingId,
+        "The replacement port did not get a new binding.",
+      );
+      assert.equal(await status(replaced.url, first.bearer), 401);
+      assert.equal(await status(replaced.url, replaced.bearer), 405);
+      return { separateAgents: true, revoked: 401, stableRestart: true, movedPort: true, redacted: true };
+    } finally {
+      if (listener.listening) await new Promise<void>((closed) => listener.close(() => closed()));
+      await runCauseEffect(connector.dispose());
+    }
+  });
+
   report.passed = true;
 } finally {
   for (const socket of sockets) socket.close();
   await stopHost();
-  await rm(root, { recursive: true, force: true });
   mkdirSync(OUT, { recursive: true });
   writeFileSync(join(OUT, "report.json"), `${JSON.stringify(report, null, 2)}\n`);
+  const groupReport = resolve(import.meta.dirname, "../.openbot-build/agent-groups");
+  mkdirSync(groupReport, { recursive: true });
+  writeFileSync(
+    join(groupReport, "team-api.json"),
+    `${JSON.stringify(
+      {
+        passed: report.passed,
+        steps: report.steps.filter(({ name }) => name.startsWith("Agent Groups:")),
+      },
+      null,
+      2,
+    )}\n`,
+  );
+  await rm(root, { recursive: true, force: true, maxRetries: 4, retryDelay: 50 }).catch((error: Error) => {
+    process.stderr.write(`Could not remove the temporary profile: ${error.message}\n`);
+  });
   process.stdout.write(`Report: ${join(OUT, "report.json")}\n`);
 }

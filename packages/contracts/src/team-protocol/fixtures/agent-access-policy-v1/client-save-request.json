@@ -1,0 +1,9 @@
+{
+  "kind": "savePolicy",
+  "expectedRevision": 3,
+  "policyId": "policy-work",
+  "name": "Work",
+  "allowNewConnections": false,
+  "choices": { "work-mcp": true, "personal-mcp": false },
+  "assignments": [{ "agentId": "agent-one", "assigned": true, "keepOverrides": false }]
+}

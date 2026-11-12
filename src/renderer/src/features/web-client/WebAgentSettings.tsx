@@ -1,12 +1,20 @@
 import { isKnownAgentProvider } from "@openbot/contracts/agent-providers";
-import type { AccountUsage, AgentStatus, ClientAgentModelOption, CustomProviderSummary } from "@openbot/contracts/ipc";
+import type {
+  AccountUsage,
+  AgentStatus,
+  ClientAgentModelOption,
+  CreateAgentInput,
+  CustomProviderSummary,
+} from "@openbot/contracts/ipc";
 import { AGENT_WELCOME_CAPABILITY, TEAM_AGENT_CREATE_MODEL_CAPABILITY } from "@openbot/contracts/team-protocol/current";
+import { sourceText } from "@openbot/i18n/source";
 import {
   createFirstAgentDraft,
   FIRST_AGENT_SUGGESTIONS,
   type FirstAgentDraft,
   FirstAgentSetup,
 } from "@openbot/ui/features/agents/FirstAgentSetup";
+import type { AgentAccessPolicyCalls, AgentAccessPolicySelection } from "@openbot/ui/features/servers/AgentGroups";
 import { useText } from "@openbot/ui/text";
 import { createEffect, createStore, onSettled } from "solid-js";
 import { type CreationPreference, resolveCreationModel } from "../agents/agent-creation-model";
@@ -15,6 +23,8 @@ import type { WebWorkspaceRuntime } from "./web-runtime";
 
 export function WebAgentSettings(props: {
   runtime: WebWorkspaceRuntime;
+  agentAccessPolicy?: AgentAccessPolicyCalls | undefined;
+  createWithPolicy: (agent: CreateAgentInput, selection: AgentAccessPolicySelection) => Promise<unknown>;
   capabilities: string[];
   /** The host has no agents yet: the form shows the first-agent copy and cannot be cancelled. */
   first: boolean;
@@ -43,7 +53,7 @@ export function WebAgentSettings(props: {
   onClose: () => void;
   onSaved: () => Promise<void>;
 }) {
-  const { t } = useText();
+  const { t, errorMessage } = useText();
   const [state, setState] = createStore<{
     draft: FirstAgentDraft;
     models: ClientAgentModelOption[];
@@ -147,7 +157,7 @@ export function WebAgentSettings(props: {
     let created = false;
     try {
       const selectedModel = state.models.find((model) => model.provider === value.provider && model.id === value.model);
-      await props.runtime.createAgent({
+      const agent: CreateAgentInput = {
         name: value.name,
         description: value.purpose,
         initialMessage: createAgentInitialMessage(value, props.capabilities.includes(AGENT_WELCOME_CAPABILITY)),
@@ -163,18 +173,31 @@ export function WebAgentSettings(props: {
                 : {}),
             }
           : {}),
-      });
+      };
+      if (value.accessPolicy) await props.createWithPolicy(agent, value.accessPolicy);
+      else await props.runtime.createAgent(agent);
       created = true;
       if (!disposed) {
         await props.onSaved();
         props.onClose();
       }
-    } catch {
-      if (!disposed)
+    } catch (error) {
+      if (!disposed) {
+        const rejectedPolicy =
+          value.accessPolicy &&
+          error instanceof Error &&
+          [
+            sourceText("error.agentAccessPolicy.stale"),
+            sourceText("error.agentAccessPolicy.invalid"),
+            sourceText("error.agentAccessPolicy.forbidden"),
+          ].includes(error.message);
         setState((draft) => {
-          draft.error = created ? t("webClient.agent.refreshFailed") : t("webClient.agent.unconfirmed");
-          draft.uncertain = true;
+          draft.error = rejectedPolicy
+            ? errorMessage(error, t("webClient.agent.unconfirmed"))
+            : t(created ? "webClient.agent.refreshFailed" : "webClient.agent.unconfirmed");
+          draft.uncertain = !rejectedPolicy;
         });
+      }
     } finally {
       if (!disposed)
         setState((draft) => {
@@ -184,6 +207,7 @@ export function WebAgentSettings(props: {
   }
   return (
     <FirstAgentSetup
+      agentAccessPolicy={props.agentAccessPolicy}
       value={state.draft}
       suggestions={FIRST_AGENT_SUGGESTIONS}
       mode={props.first ? "first" : "additional"}

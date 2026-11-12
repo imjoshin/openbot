@@ -1277,7 +1277,7 @@ export class ClaudeAgentClient extends EventEmitter<ClientEvents> {
     const usable = config.profileGeneration
       ? null
       : yield* usableMcpServers(
-          agentMcpServers(this.#mcpServers(), config.computerUse),
+          agentMcpServers(this.#mcpServers(config.agentId), config.computerUse),
           this.#mcpToolRuntimes?.(),
           this.#mcpEndpoint,
           config.agentId,

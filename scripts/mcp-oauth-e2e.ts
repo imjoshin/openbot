@@ -7,7 +7,7 @@
 // The provider payload is the one `codexMcpServers` and `claudeMcpServers` build for a spawn.
 // `bun scripts/mcp-oauth-e2e.ts`. Writes .openbot-build/mcp-oauth-e2e/report.json.
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { createHmac, randomUUID } from "node:crypto";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { createServer, request as httpRequest, type IncomingMessage, type ServerResponse } from "node:http";
 import { tmpdir } from "node:os";
@@ -346,7 +346,8 @@ async function main() {
   auth.setRevokeStatus(200);
   const signOut = await withOAuth(expiredRecord(auth.base), async (oauth, records) => {
     await runCauseEffect(oauth.signOut(mcpUrl));
-    assert.equal(records.has(mcpUrl), false);
+    assert.equal(records.get(mcpUrl)?.tokens, undefined);
+    assert.ok(records.get(mcpUrl)?.signedOutAt);
     const revoked = () => auth.hits.filter((hit) => hit.path === "/revoke");
     await auth.waitFor(() => revoked().length === 2);
     const [first, second] = revoked();
@@ -649,7 +650,9 @@ async function proxyCases(auth: Awaited<ReturnType<typeof startAuthorizationServ
     const agents = [
       { id: "agent-research", name: "Research Bot" },
       { id: "chief", name: "Ops\u0007\n\u202eBot" },
+      { id: "agent-fixture", name: "Fixture" },
     ];
+    const denied = new Set<string>();
     const startGateway = () => {
       const gateway = new McpGateway({
         servers,
@@ -660,6 +663,8 @@ async function proxyCases(auth: Awaited<ReturnType<typeof startAuthorizationServ
           appVersion: "9.9.9-e2e",
         },
         agents: () => agents,
+        allows: (agentId, connectionId) =>
+          agents.some(({ id }) => id === agentId) && !denied.has(`${agentId}/${connectionId}`),
         computerUseMcpServer: () => null,
         logger: createOpenBotLogger("agent-service", (line) => logLines.push(line)),
         hooks: { emitError: () => undefined, refreshAllAgentRuntimes: () => Effect.void },
@@ -667,7 +672,7 @@ async function proxyCases(auth: Awaited<ReturnType<typeof startAuthorizationServ
       gateways.push(gateway);
       return gateway;
     };
-    const endpointOf = async (gateway: McpGateway, config: McpServerConfig, agentId: string | null = null) => {
+    const endpointOf = async (gateway: McpGateway, config: McpServerConfig, agentId = "agent-fixture") => {
       const endpoint = await runCauseEffect(gateway.endpoint(config, agentId));
       assert.ok(!("error" in endpoint), "The proxy did not start.");
       assert.equal(endpoint.proxied, true);
@@ -708,7 +713,7 @@ async function proxyCases(auth: Awaited<ReturnType<typeof startAuthorizationServ
     const chiefRoute = await endpointOf(gateway, direct, "chief");
     const port = saved.value?.port;
     assert.ok(port);
-    assert.match(directRoute.url, new RegExp(`^http://127\\.0\\.0\\.1:${port}/mcp/[0-9a-f]{32}$`, "u"));
+    assert.match(directRoute.url, new RegExp(`^http://127\\.0\\.0\\.1:${port}/mcp/[0-9a-f]{32}/[0-9a-f]{32}$`, "u"));
     const codexDirect = codex.servers.Resource;
     assert.ok(codexDirect && "url" in codexDirect);
     assert.match(codexDirect.url, new RegExp(`^http://127\\.0\\.0\\.1:${port}/mcp/[0-9a-f]{32}/[0-9a-f]{32}$`, "u"));
@@ -737,7 +742,7 @@ async function proxyCases(auth: Awaited<ReturnType<typeof startAuthorizationServ
       version: "9.9.9-e2e",
       websiteUrl: "https://openbot.run",
     });
-    assert.deepEqual(resource.clients.at(-1), openbotClient("OpenBot"));
+    assert.deepEqual(resource.clients.at(-1), openbotClient("Fixture (OpenBot)"));
     // n8n answers each `User-Agent` with "bot" in it with an empty 204 (#6497).
     assert.ok(upstream.every((hit) => !/bot/iu.test(hit.userAgent ?? "")));
     const titleOf = async (route: { url: string; bearer: string }) => {
@@ -757,19 +762,27 @@ async function proxyCases(auth: Awaited<ReturnType<typeof startAuthorizationServ
     assert.ok(research);
     research.name = "Renamed Bot";
     assert.equal(await titleOf(researchRoute), "Renamed Bot (OpenBot)");
-    assert.equal(await titleOf(await endpointOf(gateway, direct, "removed-agent")), "OpenBot");
-    // The bearer of a route opens neither the same row for another agent nor the row with no agent.
+    assert.ok("error" in (await runCauseEffect(gateway.endpoint(direct, "removed-agent"))));
+    assert.ok("error" in (await runCauseEffect(gateway.endpoint(direct))));
+    // The bearer of a route opens neither the same row for another agent nor a legacy unscoped route.
     const hitsBeforeCross = resource.hits.length;
     assert.equal(await rawPost(researchRoute.url, { authorization: `Bearer ${directRoute.bearer}` }), 403);
     assert.equal(await rawPost(directRoute.url, { authorization: `Bearer ${researchRoute.bearer}` }), 403);
     assert.equal(await rawPost(chiefRoute.url, { authorization: `Bearer ${researchRoute.bearer}` }), 403);
+    const oldRoute = directRoute.url.slice(0, directRoute.url.lastIndexOf("/"));
+    const oldSecret = saved.value?.secret;
+    assert.ok(oldSecret);
+    const oldBearer = createHmac("sha256", oldSecret)
+      .update(oldRoute.split("/").at(-1) ?? "")
+      .digest("base64url");
+    await assert.rejects(connect(oldRoute, oldBearer), McpError);
     assert.equal(resource.hits.length, hitsBeforeCross, "A request with another route's bearer reached the server.");
     const clientIdentity = {
-      withoutAgent: "OpenBot",
+      withoutAgent: "refused",
       agent: "Research Bot (OpenBot)",
       controlCharacters: "Ops Bot (OpenBot)",
       renamed: "Renamed Bot (OpenBot)",
-      unknownAgent: "OpenBot",
+      unknownAgent: "refused",
       userAgentWithoutBot: true,
       crossAgentBearers: 403,
     };
@@ -838,6 +851,37 @@ async function proxyCases(auth: Awaited<ReturnType<typeof startAuthorizationServ
     assert.equal(records.get(direct.url)?.tokens?.access_token, "access-rotated");
     assert.ok(!resource.hits.some((hit) => hit.path.includes("account")), "The account fragment went upstream.");
     const accountRefresh = { ownSignInRefreshed: true, fragmentUpstream: false };
+
+    // An already-issued route refuses every MCP operation for a denied connection.
+    const revokedCalls = [
+      "tools/list",
+      "tools/call",
+      "resources/list",
+      "resources/read",
+      "prompts/list",
+      "prompts/get",
+    ];
+    denied.add(`agent-fixture/${account.id}`);
+    const beforeRevoked = resource.hits.length;
+    for (const method of revokedCalls) {
+      const response = await fetch(accountRoute.url, {
+        method: "POST",
+        headers: {
+          accept: "application/json, text/event-stream",
+          "content-type": "application/json",
+          authorization: `Bearer ${accountRoute.bearer}`,
+        },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method }),
+      });
+      assert.equal(response.status, 200);
+      assert.match(await response.text(), /"code":-32001/u);
+    }
+    assert.equal(resource.hits.length, beforeRevoked);
+    assert.equal(
+      textOf(await client.callTool({ name: "echo", arguments: { text: "other connection" } })),
+      "other connection",
+    );
+    denied.clear();
 
     // The server refuses a call with a sign-in that is still good (#6914): it refuses the renewed
     // token too. The agent reads that the sign-in is active, not that it ended, and the row keeps it.
@@ -947,6 +991,7 @@ async function proxyCases(auth: Awaited<ReturnType<typeof startAuthorizationServ
       refused,
       midSessionRefresh,
       accountRefresh,
+      revokedCalls,
       refusedWithSignIn,
       signedOut,
       expiredWithoutRefresh,
@@ -957,7 +1002,10 @@ async function proxyCases(auth: Awaited<ReturnType<typeof startAuthorizationServ
     for (const open of gateways) await runCauseEffect(open.close());
     await resource.close();
     database.close();
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 4, retryDelay: 50 }).catch((error: Error) => {
+      if (process.platform !== "win32" || !("code" in error) || error.code !== "EBUSY") throw error;
+      process.stderr.write(`Could not remove the temporary MCP profile. ${error.message}\n`);
+    });
   }
 }
 

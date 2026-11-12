@@ -10,6 +10,7 @@ const storedSettingsSchema = z.object({ version: z.literal(1), value: z.string()
 const settingsSchema = z.object({
   port: z.number().int().min(1).max(65_535).nullable(),
   secret: z.string().min(32),
+  bindingId: z.uuid().optional(),
 });
 
 /**

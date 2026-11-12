@@ -63,7 +63,7 @@ function contents(db: DatabaseSync): Contents {
   const tables = db
     .prepare(
       `SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'
-       AND name <> 'schema_migrations' AND name NOT LIKE 'agent_memory_search%' ORDER BY name`,
+       AND name <> 'schema_migrations' AND name NOT GLOB 'agent_access_polic*' AND name NOT LIKE 'agent_memory_search%' ORDER BY name`,
     )
     .all()
     .map((row) => String(row.name));
@@ -89,7 +89,7 @@ function columns(db: DatabaseSync, table: string): string[] {
 }
 
 function expectHealthy(db: DatabaseSync): void {
-  expect(db.prepare("SELECT MAX(version) AS version FROM schema_migrations").get()).toEqual({ version: 60 });
+  expect(db.prepare("SELECT MAX(version) AS version FROM schema_migrations").get()).toEqual({ version: 61 });
   expect(db.prepare("PRAGMA foreign_keys").get()).toEqual({ foreign_keys: 1 });
   expect(db.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
   expect(db.prepare("PRAGMA integrity_check").get()).toEqual({ integrity_check: "ok" });
@@ -148,9 +148,9 @@ describe("agent routine run place migration", () => {
     seed(db);
     const before = contents(db);
     const columnsBefore = columns(db, "projection_agent_routines");
-    db.exec("INSERT INTO schema_migrations VALUES(61,'now')");
+    db.exec("INSERT INTO schema_migrations VALUES(62,'now')");
     expect(() => migrateOpenBotDatabase(db)).toThrow("newer than this application supports");
-    db.exec("DELETE FROM schema_migrations WHERE version=61; DELETE FROM schema_migrations WHERE version=54");
+    db.exec("DELETE FROM schema_migrations WHERE version=62; DELETE FROM schema_migrations WHERE version=54");
     expect(() => migrateOpenBotDatabase(db)).toThrow("missing version 54");
     expect(contents(db)).toEqual(before);
     expect(columns(db, "projection_agent_routines")).toEqual(columnsBefore);
@@ -161,8 +161,8 @@ describe("agent routine run place migration", () => {
     seed(db);
     migrateOpenBotDatabase(db);
     const after = contents(db);
-    // An application one release older knows versions up to 60 at most: version 61 is newer than it supports.
-    db.exec("INSERT INTO schema_migrations VALUES(61,'now')");
+    // An application one release older knows versions up to 61 at most: version 62 is newer than it supports.
+    db.exec("INSERT INTO schema_migrations VALUES(62,'now')");
     expect(() => migrateOpenBotDatabase(db)).toThrow("newer than this application supports");
     expect(contents(db)).toEqual(after);
   });

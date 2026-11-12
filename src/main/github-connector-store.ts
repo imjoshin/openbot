@@ -20,7 +20,13 @@ const githubConnectorRecordSchema = z.object({
    * The loopback GitHub MCP server that agents reach. Its port and bearer stay the same across
    * restarts, because a resumed Codex session keeps the URL and header that it started with.
    */
-  mcpProxy: z.object({ port: z.number().int().min(1).max(65_535), secret: z.string().min(32) }).nullish(),
+  mcpProxy: z
+    .object({
+      port: z.number().int().min(1).max(65_535),
+      secret: z.string().min(32),
+      bindingId: z.uuid().optional(),
+    })
+    .nullish(),
 });
 
 export type GitHubConnectorRecord = z.infer<typeof githubConnectorRecordSchema>;

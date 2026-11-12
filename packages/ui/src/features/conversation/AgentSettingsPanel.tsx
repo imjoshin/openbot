@@ -113,6 +113,7 @@ import {
 } from "solid-js";
 import { useText } from "../../text";
 import { avatarColorChoiceLabel } from "../agents/avatar-hue-label";
+import { AgentMcpPermissions, type AgentMcpPermissionsOptions } from "../servers/AgentGroups";
 import { SERVER_NOTIFICATION_LEVEL_LABELS } from "../servers/ServerActionItems";
 import { AgentChatColorRow } from "../settings/ChatColorSetting";
 import { AgentDeleteHistoryDialog } from "./AgentDeleteHistoryDialog";
@@ -132,6 +133,7 @@ export type AgentRuntimeSettingsPatch =
   | Pick<AgentRuntimeSettings, "reasoningEffort">;
 
 export interface AgentSettingsPanelProps {
+  agentAccessPolicy?: AgentMcpPermissionsOptions | undefined;
   agent: AgentProfile;
   runtimeSettings: AgentRuntimeSettings;
   agentStatus: AgentStatus;
@@ -1481,6 +1483,15 @@ export default function AgentSettingsPanel(props: AgentSettingsPanelProps) {
               </Show>
             </Show>
             <Show when={page() === "permissions"}>
+              <Show when={props.agentAccessPolicy}>
+                {(policy) => (
+                  <AgentMcpPermissions
+                    agentId={props.agent.id}
+                    calls={policy().calls}
+                    onViewGroups={policy().onViewGroups}
+                  />
+                )}
+              </Show>
               <Show when={props.onUpdatePermissions}>
                 <SettingsLinkGroup inset class="agent-settings-runtime-rows">
                   <Select<AgentPermissionLevel>

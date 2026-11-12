@@ -9,6 +9,7 @@ import {
   type UpdateAgentInput,
 } from "@openbot/contracts/ipc";
 import { TEAM_API_ROUTES } from "@openbot/contracts/team-api-routes";
+import { AGENT_ACCESS_POLICY_CAPABILITY } from "@openbot/contracts/team-protocol/agent-access-policy-v1";
 import { AGENT_ACCESS_CAPABILITY } from "@openbot/contracts/team-protocol/agent-access-v1";
 import { AGENT_ADMIN_CAPABILITY } from "@openbot/contracts/team-protocol/agent-admin-v1";
 import { AGENT_BACKUP_MODELS_CAPABILITY } from "@openbot/contracts/team-protocol/agent-backup-models-v1";
@@ -92,6 +93,7 @@ import { createFocusUsePing } from "@openbot/team-client/focus-use";
 import { createHostedServerWake, WAKE_RECONNECT_DELAY_MS } from "@openbot/team-client/hosted-server-wake";
 import type { RemoteFileUpload, RemoteTeamEvent } from "@openbot/team-client/remote-peer";
 import {
+  createAgentWithAccessPolicy,
   createHostLocalServer,
   deleteHostLocalServer,
   type HostLocalServerList,
@@ -2017,10 +2019,10 @@ export function MobileWorkspaceProvider({ children }: PropsWithChildren) {
         );
       },
       createAgent: async (input: NewAgentInput) => {
-        const serverId = currentActiveServer().id;
+        const serverId = input.accessPolicy?.serverId ?? currentActiveServer().id;
         const firstTask = input.firstTask?.trim() ?? "";
         const welcome = hasCapability(serverCapabilities.current, serverId, AGENT_WELCOME_CAPABILITY);
-        const created = await request("POST", TEAM_API_ROUTES.agents.all, decodeAgent, {
+        const agent = {
           name: input.name,
           description: input.description,
           avatarSeed: input.avatarSeed,
@@ -2041,7 +2043,18 @@ export function MobileWorkspaceProvider({ children }: PropsWithChildren) {
                 ...(input.reasoningEffort ? { reasoningEffort: input.reasoningEffort } : {}),
               }
             : {}),
-        });
+        };
+        const created = input.accessPolicy
+          ? remoteAgentOf(
+              await runTeamRequest(
+                createAgentWithAccessPolicy(teamApi(serverId), {
+                  agent,
+                  policyId: input.accessPolicy.policyId,
+                  expectedRevision: input.accessPolicy.expectedRevision,
+                }),
+              ),
+            )
+          : await request("POST", TEAM_API_ROUTES.agents.all, decodeAgent, agent, serverId);
         setAgents((current) => [
           ...current.filter((agent) => agent.id !== created.id),
           projectAgent(serverId, created, null),
@@ -2456,6 +2469,7 @@ export function MobileWorkspaceProvider({ children }: PropsWithChildren) {
       canManageServerTimezone: (serverId) => administers(serverId, HOST_TIMEZONE_CAPABILITY),
       canReadMachineMetrics: (serverId) => administers(serverId, MACHINE_RESOURCES_CAPABILITY),
       canManageAgentMemoryLimit: (serverId) => administers(serverId, AGENT_MEMORY_LIMIT_CAPABILITY),
+      canManageAgentAccessPolicy: (serverId) => administers(serverId, AGENT_ACCESS_POLICY_CAPABILITY),
       canManageServerRoles: (serverId) => administers(serverId, AGENT_ACCESS_CAPABILITY),
       canReadServerAudit: (serverId) => administers(serverId, SERVER_AUDIT_CAPABILITY),
       hasAgentAccessLimits: (serverId) => {

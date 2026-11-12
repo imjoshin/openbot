@@ -1,0 +1,10 @@
+{
+  "token": "staged-transfer-one",
+  "keys": ["agent-one"],
+  "expectedRevision": 5,
+  "agentMappings": [{ "key": "agent-one", "policyId": "destination-work" }],
+  "connectionMappings": [
+    { "sourceId": "source-work", "destinationId": "destination-work-mcp" },
+    { "sourceId": "source-personal", "destinationId": "destination-personal-mcp" }
+  ]
+}

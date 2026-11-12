@@ -66,6 +66,9 @@ SolidJS, provider, Cloudflare, and application code; and the account server to d
 
 ## State ownership
 
+- Agent Groups use host-owned SQLite policies and per-agent overrides. Backend services resolve
+  access and refresh managed MCP runtimes. Main, preload, and Team API adapters expose the same
+  revision-checked operations. See [Agent Groups design](../agent-access-policy-design.md).
 - `openbot.db` is the source of truth for OpenBot agents, conversations, queues, reactions,
   attachments, and provider-session bindings.
 - `RoutineStore` saves a routine and its webhook trigger in one transaction. `WebhookRouteStore`

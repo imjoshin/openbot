@@ -4,7 +4,7 @@ import { GitHubOperationError, githubCall, toGitHubOperationError } from "./gith
 // server with the token for each call: the bot token of the repository that the call names, or
 // the user token.
 
-import { timingSafeEqual } from "node:crypto";
+import { createHmac, timingSafeEqual } from "node:crypto";
 import { createServer, type Server as HttpServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport, StreamableHTTPError } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
@@ -21,7 +21,7 @@ import {
   ReadResourceRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { isDynamicRecord, isString } from "@openbot/contracts/runtime-values";
-import { createOpenBotLogger, toLogValue } from "@openbot/logging";
+import { createOpenBotLogger, registerSecretValue, toLogValue } from "@openbot/logging";
 import { runCauseEffect } from "../backend/effect-boundary";
 import { readJsonBody } from "../backend/local-mcp-bridge";
 import { cutModelText, MCP_RESULT_MORE, MCP_RESULT_TEXT_LIMIT } from "../backend/model-text-limit";
@@ -56,6 +56,8 @@ export interface GitHubMcpProxyOptions {
   upstreamUrl: string;
   /** The bearer that agents send. It stays the same across restarts, so a resumed session keeps working. */
   secret: () => string;
+  /** When supplied, every request must use a route for an agent whose current policy allows it. */
+  allowsAgentKey?: (agentKey: string) => boolean;
   /** The user token, or null while the connection is not active. */
   userToken: () => Effect.Effect<string | null, GitHubOperationError>;
   /** The bot token of `owner/name`, or null when the user token applies. */
@@ -90,8 +92,22 @@ export class GitHubMcpProxy {
   }
 
   /** The URL that agents are given, or null before `start`. */
-  url(): string | null {
-    return this.#port === null ? null : `http://127.0.0.1:${this.#port}/mcp`;
+  url(agentKey?: string): string | null {
+    if (this.#port === null) return null;
+    const path = agentKey ? `/mcp/${agentKey}` : "/mcp";
+    return `http://127.0.0.1:${this.#port}${path}`;
+  }
+
+  bearer(agentKey?: string): string {
+    const token = this.#bearer(agentKey);
+    registerSecretValue(token);
+    return token;
+  }
+
+  #bearer(agentKey?: string): string {
+    const secret = this.#options.secret();
+    if (!agentKey) return secret;
+    return createHmac("sha256", secret).update(`github-mcp\0${agentKey}`).digest("base64url");
   }
 
   /**
@@ -192,9 +208,14 @@ export class GitHubMcpProxy {
     }
     // No `sessionIdGenerator`: each POST is one stateless request.
     const transport = new StreamableHTTPServerTransport({});
-    yield* Effect.gen(function* () {
+    yield* Effect.gen({ self: this }, function* () {
       yield* githubCall(() => mcp.connect(transport));
       const body = yield* readJsonBody(request, MAX_BODY_BYTES).pipe(toGitHubOperationError);
+      if (!this.#authorized(request)) {
+        response.writeHead(401, { "content-type": "application/json" });
+        response.end(JSON.stringify({ error: "unauthorized" }));
+        return;
+      }
       yield* githubCall(() => transport.handleRequest(request, response, body));
     }).pipe(
       Effect.catch(() =>
@@ -346,11 +367,17 @@ export class GitHubMcpProxy {
   });
 
   #authorized(request: IncomingMessage): boolean {
+    const path = /^\/mcp(?:\/([0-9a-f]{32}))?$/u.exec(request.url ?? "");
+    if (!path) return false;
     const header = request.headers.authorization;
     if (!header?.startsWith("Bearer ")) return false;
     const candidate = Buffer.from(header.slice("Bearer ".length));
-    const secret = Buffer.from(this.#options.secret());
-    return candidate.length === secret.length && timingSafeEqual(candidate, secret);
+    const agentKey = path[1];
+    const secret = Buffer.from(this.#bearer(agentKey));
+    if (candidate.length !== secret.length || !timingSafeEqual(candidate, secret)) return false;
+    return (
+      this.#options.allowsAgentKey === undefined || (agentKey !== undefined && this.#options.allowsAgentKey(agentKey))
+    );
   }
 }
 

@@ -10,6 +10,9 @@ import { Alert } from "react-native";
 import { AgentAppearancePicker, type AgentColorValue } from "@/features/agents/components/agent-appearance-picker";
 import { AgentRuntimeFields } from "@/features/agents/components/agent-runtime-fields";
 import { InstructionsLimit, instructionsTooLong } from "@/features/agents/components/instructions-limit";
+import { AgentGroupPickerRow, AgentPolicyStatus } from "@/features/servers/components/agent-access-policy-controls";
+import { useAgentAccessPolicies } from "@/features/servers/model/use-agent-access-policies";
+import { SettingsRow, SettingsSection } from "@/features/settings/components/settings-content";
 import { useMobileWorkspace, useMobileWorkspaceReader } from "@/features/workspace/context/mobile-workspace-context";
 import { showsOnline } from "@/features/workspace/model/server-status";
 import { AndroidHeaderButton } from "@/shared/components/android-header-button";
@@ -28,6 +31,8 @@ export function AddAgentScreen() {
   const workspace = useMobileWorkspaceReader();
   // The agent is created on the server that was active when the form opened.
   const [serverId] = useState(() => workspace().activeServer.id);
+  const policies = useAgentAccessPolicies(serverId);
+  const [accessPolicy, setAccessPolicy] = useState<{ serverId: string; policyId: string; expectedRevision: number }>();
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [runtime, setRuntime] = useState<AgentRuntimeChoice>({});
@@ -49,7 +54,8 @@ export function AddAgentScreen() {
       avatarSeed !== initialAvatarSeed ||
       avatarColor.hue !== null ||
       avatarColor.color !== null ||
-      runtime.provider !== undefined,
+      runtime.provider !== undefined ||
+      accessPolicy,
   );
   // Discard turns prevention off before it repeats the action, so the hook does not warn.
   const [discarding, setDiscarding] = useState(false);
@@ -89,12 +95,14 @@ export function AddAgentScreen() {
         avatarHue: avatarColor.hue,
         avatarColor: avatarColor.color,
         ...(workspace().activeServer.id === serverId ? runtime : {}),
+        ...(accessPolicy ? { accessPolicy } : {}),
       });
       void haptics.notification("success");
       setFinished(true);
     } catch (cause) {
       void haptics.notification("error");
       setError(errorMessage(cause, t("mobile.agent.add.failed")));
+      if (accessPolicy) policies.reload();
       pending.current = false;
       setSaving(false);
     }
@@ -143,6 +151,30 @@ export function AddAgentScreen() {
         pendingLabel={t("mobile.agent.add.creating")}
         onSave={() => void submit()}
       />
+      {policies.available ? (
+        <>
+          <AgentPolicyStatus policy={policies} />
+          {policies.data ? (
+            <SettingsSection>
+              <AgentGroupPickerRow
+                policies={policies.data.policies}
+                value={accessPolicy?.policyId ?? null}
+                disabled={saving || policies.busy}
+                onChange={(policyId) => {
+                  if (!policyId) setAccessPolicy(undefined);
+                  else if (policies.data)
+                    setAccessPolicy({ policyId, serverId, expectedRevision: policies.data.revision });
+                }}
+              />
+              {accessPolicy && accessPolicy.expectedRevision !== policies.data.revision ? (
+                <SettingsRow disclosure={false} onPress={() => setAccessPolicy(undefined)}>
+                  <Typography.Paragraph>{t("mobile.server.agentGroups.selectAgain")}</Typography.Paragraph>
+                </SettingsRow>
+              ) : null}
+            </SettingsSection>
+          ) : null}
+        </>
+      ) : null}
       <AgentAppearancePicker
         seed={avatarSeed}
         hue={avatarColor.hue}

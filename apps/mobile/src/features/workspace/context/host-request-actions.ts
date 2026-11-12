@@ -35,6 +35,7 @@ import {
 } from "@openbot/contracts/ipc";
 import { isDynamicRecord, isString } from "@openbot/contracts/runtime-values";
 import { TEAM_API_ROUTES } from "@openbot/contracts/team-api-routes";
+import { AGENT_ACCESS_POLICY_CAPABILITY } from "@openbot/contracts/team-protocol/agent-access-policy-v1";
 import { AGENT_ACCESS_CAPABILITY } from "@openbot/contracts/team-protocol/agent-access-v1";
 import { AGENT_ADMIN_CAPABILITY, AGENT_ADMIN_ROUTES } from "@openbot/contracts/team-protocol/agent-admin-v1";
 import {
@@ -159,6 +160,8 @@ import type { RemoteFileUpload } from "@openbot/team-client/remote-peer";
 import { buildRoutineCalendar, type RoutineCalendarSource } from "@openbot/team-client/routine-calendar";
 import {
   addAgentFolder,
+  applyAgentAccessPolicy,
+  applyTransferMapping,
   bitwardenConnectorRequest,
   browseAgentFolders,
   cancelHostUpdate,
@@ -184,6 +187,7 @@ import {
   getHostTimezone,
   getHostUpdateStatus,
   getRoutineResultDestination,
+  getTransferMapping,
   githubConnectorRepositories,
   githubConnectorRequest,
   importHostVaultCsv,
@@ -191,6 +195,7 @@ import {
   installAgentSkill,
   installAgentTemplate,
   installMarketplaceAgent,
+  listAgentAccessPolicies,
   listAgentNotificationLevels,
   listAgentSkills,
   listEventActivity,
@@ -215,7 +220,9 @@ import {
   messagingConnectorSetEnabled,
   onePasswordConnectorRequest,
   passwordManagerRequest,
+  previewAgentAccessPolicy,
   previewAgentTemplate,
+  previewTransferMapping,
   publishAgentTemplate,
   readAgentFolders,
   readAgentSessionSettings,
@@ -413,6 +420,9 @@ type HostRequestActions = Pick<
   | "setServerTimezone"
   | "loadAgentMemoryLimit"
   | "setAgentMemoryLimit"
+  | "loadAgentAccessPolicies"
+  | "previewAgentAccessPolicy"
+  | "applyAgentAccessPolicy"
   | "loadServerRoles"
   | "setServerRoles"
   | "loadServerAuditLog"
@@ -443,6 +453,9 @@ type HostRequestActions = Pick<
   | "downloadInstanceTransfer"
   | "stageInstanceTransfer"
   | "applyInstanceTransfer"
+  | "getTransferMapping"
+  | "previewTransferMapping"
+  | "applyTransferMapping"
   | "discardInstanceTransfer"
   | "loadBrowserProfiles"
   | "createBrowserProfile"
@@ -648,6 +661,8 @@ export function createHostRequestActions({
   const memoryLimitAdmin = (serverId: string) =>
     capabilityApi(serverId, AGENT_MEMORY_LIMIT_CAPABILITY, "mobile.server.settings.memoryLimitUnsupported");
   /** The roles that set the agents of each member are an optional admin route set. */
+  const accessPolicyAdmin = (serverId: string) =>
+    capabilityApi(serverId, AGENT_ACCESS_POLICY_CAPABILITY, "mobile.server.agentGroups.unsupported");
   const rolesAdmin = (serverId: string) =>
     capabilityApi(serverId, AGENT_ACCESS_CAPABILITY, "mobile.server.roles.unsupported");
   /** The audit log of the access changes is an optional admin route set. */
@@ -750,6 +765,11 @@ export function createHostRequestActions({
     loadAgentMemoryLimit: async (serverId) => runTeamRequest(getHostAgentMemoryLimit(memoryLimitAdmin(serverId))),
     setAgentMemoryLimit: async (limit, serverId) =>
       runTeamRequest(setHostAgentMemoryLimit(memoryLimitAdmin(serverId), limit)),
+    loadAgentAccessPolicies: async (serverId) => runTeamRequest(listAgentAccessPolicies(accessPolicyAdmin(serverId))),
+    previewAgentAccessPolicy: async (input, serverId) =>
+      runTeamRequest(previewAgentAccessPolicy(accessPolicyAdmin(serverId), input)),
+    applyAgentAccessPolicy: async (input, serverId) =>
+      runTeamRequest(applyAgentAccessPolicy(accessPolicyAdmin(serverId), input)),
     loadServerRoles: async (serverId) => runTeamRequest(getHostAgentAccess(rolesAdmin(serverId))),
     setServerRoles: async (change, serverId) => runTeamRequest(setHostAgentAccess(rolesAdmin(serverId), change)),
     loadServerAuditLog: async (serverId) => runTeamRequest(getHostAuditLog(auditAdmin(serverId))),
@@ -819,6 +839,12 @@ export function createHostRequestActions({
       runTeamRequest(stageInstanceTransfer(transferAdmin(serverId, onProgress), upload)),
     applyInstanceTransfer: async (input, serverId) =>
       runTeamRequest(applyInstanceTransfer(transferAdmin(serverId), input, phoneTimezone())),
+    getTransferMapping: async (input, serverId) =>
+      runTeamRequest(getTransferMapping(accessPolicyAdmin(serverId), input)),
+    previewTransferMapping: async (input, serverId) =>
+      runTeamRequest(previewTransferMapping(accessPolicyAdmin(serverId), input)),
+    applyTransferMapping: async (input, serverId) =>
+      runTeamRequest(applyTransferMapping(accessPolicyAdmin(serverId), input, phoneTimezone())),
     discardInstanceTransfer: async (token, serverId) =>
       runTeamRequest(discardInstanceTransfer(transferAdmin(serverId), token)),
     loadBrowserProfiles: async (serverId) => runTeamRequest(listHostBrowserProfiles(browserProfilesAdmin(serverId))),

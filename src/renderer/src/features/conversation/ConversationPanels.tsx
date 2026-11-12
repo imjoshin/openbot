@@ -828,6 +828,7 @@ export function ConversationPanels(panelProps: { onOpenUsage?: ((trigger: HTMLBu
               browserProfileCalls={
                 serverCanAdminister(props.server, BROWSER_PROFILES_CAPABILITY) ? browserProfileCalls() : undefined
               }
+              agentAccessPolicy={props.agentAccessPolicy}
               onManageBrowserProfiles={props.onManageBrowserProfiles}
               notificationLevelCalls={notificationLevelCalls()}
               serverNotificationLevel={props.server?.notificationLevel}

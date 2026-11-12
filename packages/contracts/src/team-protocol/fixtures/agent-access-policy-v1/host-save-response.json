@@ -1,0 +1,46 @@
+{
+  "status": "saved",
+  "snapshot": {
+    "revision": 4,
+    "policies": [
+      {
+        "id": "policy-work",
+        "name": "Work",
+        "revision": 2,
+        "allowNewConnections": false,
+        "choices": { "work-mcp": true, "personal-mcp": false }
+      }
+    ],
+    "agents": [
+      {
+        "id": "agent-one",
+        "name": "Agent One",
+        "policyId": "policy-work",
+        "overrides": {},
+        "connections": [
+          {
+            "connectionId": "work-mcp",
+            "source": "policy",
+            "groupValue": true,
+            "override": null,
+            "allowed": true,
+            "available": true
+          },
+          {
+            "connectionId": "personal-mcp",
+            "source": "policy",
+            "groupValue": false,
+            "override": null,
+            "allowed": false,
+            "available": true
+          }
+        ]
+      }
+    ],
+    "connections": [
+      { "id": "work-mcp", "name": "Work Slack", "accountLabel": null, "available": true },
+      { "id": "personal-mcp", "name": "Personal Slack", "accountLabel": null, "available": true }
+    ]
+  },
+  "agentIds": []
+}

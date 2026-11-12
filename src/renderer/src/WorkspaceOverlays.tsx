@@ -6,6 +6,7 @@ import {
   type RoutineFields,
   type ServerSummary,
 } from "@openbot/contracts/ipc";
+import { AGENT_ACCESS_POLICY_CAPABILITY } from "@openbot/contracts/team-protocol/agent-access-policy-v1";
 import { BROWSER_PROFILES_CAPABILITY } from "@openbot/contracts/team-protocol/browser-profiles-v1";
 import { PROVIDER_DETECTION_CAPABILITY } from "@openbot/contracts/team-protocol/provider-detection-v1";
 import { VAULT_IMPORT_CAPABILITY } from "@openbot/contracts/team-protocol/vault-import-v1";
@@ -45,6 +46,7 @@ import { useSetup } from "./features/onboarding/onboarding-context";
 import { useRemoteDesktop } from "./features/remote-desktop/remote-desktop-context";
 import { desktopScheduleSource } from "./features/schedule/schedule-port";
 import { AddServerOverlay } from "./features/servers/AddServerOverlay";
+import { agentAccessPolicyPort, desktopAgentAccessPolicyCalls } from "./features/servers/agent-access-policy-port";
 import {
   createdRoutines,
   HostedServerUpsell,
@@ -990,6 +992,13 @@ function ServerSettings() {
           hostModelVisibility={{}}
           hostDefaultProvider={{}}
           agentAccess={{ listAgents: () => appPort().agent.listAgents(server().id) }}
+          agentAccessPolicy={(() => {
+            const host = server();
+            return serverCanAdminister(host, AGENT_ACCESS_POLICY_CAPABILITY) &&
+              (host.kind === "local" || host.state === "online")
+              ? desktopAgentAccessPolicyCalls(host.id)
+              : undefined;
+          })()}
           serverAudit={{ listAgents: () => appPort().agent.listAgents(server().id) }}
           initialSection={serverSettingsSection()}
           // Any member imports into this computer or a remote host with `agent-import-v1`.
@@ -1004,10 +1013,19 @@ function ServerSettings() {
           // Owners and admins move this computer's server, or a remote host with `instance-transfer-v1`.
           instanceTransfer={
             server().kind === "local"
-              ? { onSignIn: (provider) => void connection.connect(provider), history: true }
+              ? {
+                  onSignIn: (provider) => void connection.connect(provider),
+                  history: true,
+                  policyMapping: agentAccessPolicyPort(),
+                }
               : serverCanAdminister(server(), "instance-transfer-v1")
                 ? // Only the transfer in parts carries the chat history.
-                  { history: serverCanAdminister(server(), "instance-transfer-chunks-v1") }
+                  {
+                    history: serverCanAdminister(server(), "instance-transfer-chunks-v1"),
+                    policyMapping: serverCanAdminister(server(), AGENT_ACCESS_POLICY_CAPABILITY)
+                      ? agentAccessPolicyPort()
+                      : undefined,
+                  }
                 : undefined
           }
           // The feed listens on this computer, so a calendar app on another one cannot read it.

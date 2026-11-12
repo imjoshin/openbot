@@ -43,7 +43,7 @@ function contents(db: DatabaseSync): Contents {
   const tables = db
     .prepare(
       `SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'
-       AND name <> 'schema_migrations' AND name NOT LIKE 'agent_memory_search%' ORDER BY name`,
+       AND name <> 'schema_migrations' AND name NOT GLOB 'agent_access_polic*' AND name NOT LIKE 'agent_memory_search%' ORDER BY name`,
     )
     .all()
     .map((row) => String(row.name));
@@ -110,7 +110,7 @@ describe("agent wait migration", () => {
         agent_usage_skill_loads: [],
         projection_messaging_pings: [],
       });
-      expect(db.prepare("SELECT MAX(version) AS version FROM schema_migrations").get()).toEqual({ version: 60 });
+      expect(db.prepare("SELECT MAX(version) AS version FROM schema_migrations").get()).toEqual({ version: 61 });
       expect(db.prepare("PRAGMA foreign_keys").get()).toEqual({ foreign_keys: 1 });
       expect(db.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
       expect(db.prepare("PRAGMA integrity_check").get()).toEqual({ integrity_check: "ok" });
@@ -164,9 +164,9 @@ describe("agent wait migration", () => {
   it("rejects newer and incomplete migration histories before it creates the table", () => {
     const db = databaseAtWithSeed(33);
     const before = contents(db);
-    db.exec("INSERT INTO schema_migrations VALUES(61,'now')");
+    db.exec("INSERT INTO schema_migrations VALUES(62,'now')");
     expect(() => migrateOpenBotDatabase(db)).toThrow("newer than this application supports");
-    db.exec("DELETE FROM schema_migrations WHERE version=61; DELETE FROM schema_migrations WHERE version=20");
+    db.exec("DELETE FROM schema_migrations WHERE version=62; DELETE FROM schema_migrations WHERE version=20");
     expect(() => migrateOpenBotDatabase(db)).toThrow("missing version 20");
     expect(contents(db)).toEqual(before);
     expect(waitTables(db)).toEqual([]);

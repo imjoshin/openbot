@@ -502,6 +502,7 @@ export default function AgentSettingsPanel(props: AgentSettingsPanelProps) {
 
   return (
     <SharedAgentSettingsPanel
+      agentAccessPolicy={props.agentAccessPolicy}
       {...props}
       browserProfiles={browserProfileOptions()}
       notificationLevel={notificationLevelOptions()}

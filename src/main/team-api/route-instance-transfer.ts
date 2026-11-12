@@ -1,5 +1,6 @@
 import { rm } from "node:fs/promises";
 import { parseApplyInstanceTransferInput, parseExportInstanceInput } from "@openbot/contracts/ipc";
+import { AGENT_ACCESS_POLICY_ROUTES } from "@openbot/contracts/team-protocol/agent-access-policy-v1";
 import {
   INSTANCE_TRANSFER_CAPABILITY,
   INSTANCE_TRANSFER_REMOTE_BYTES,
@@ -8,14 +9,67 @@ import {
 import { sourceText } from "@openbot/i18n/source";
 import { Effect } from "effect";
 import { runCauseEffect } from "../../backend/effect-boundary";
-import type { TeamApiInstanceTransfer } from "./dependencies";
+import {
+  parseAgentAccessPolicyTransferMapping,
+  parseAgentAccessPolicyTransferSelection,
+} from "../ipc/agent-access-policy-inputs";
+import type { TeamApiAgentAccessPolicy, TeamApiInstanceTransfer } from "./dependencies";
 import { HttpError } from "./http-error";
 import type { RouteOutcome, TeamApiRequestContext } from "./request-context";
 import { readBinary, readJson, requireAdmin, stringField } from "./request-helpers";
+import { readAgentAccessPolicyInput, requireAgentAccessPolicy } from "./route-agent-access-policy";
 import { answer } from "./route-agent-import";
 import { sendFile } from "./route-files";
 
 const ROUTES: ReadonlySet<string> = new Set(Object.values(INSTANCE_TRANSFER_ROUTES));
+
+export async function routeInstanceTransferMapping(
+  context: TeamApiRequestContext,
+  instanceTransfer: TeamApiInstanceTransfer | undefined,
+  policy: TeamApiAgentAccessPolicy | undefined,
+  newAgentHidden: () => boolean,
+): Promise<RouteOutcome> {
+  const { method, url, member, json } = context;
+  const { getTransferMapping, previewTransferMapping, applyTransferMapping } = AGENT_ACCESS_POLICY_ROUTES;
+  const path = url.pathname;
+  if (
+    method !== "POST" ||
+    (path !== getTransferMapping && path !== previewTransferMapping && path !== applyTransferMapping)
+  ) {
+    return "unmatched";
+  }
+  requireAgentAccessPolicy(context, policy);
+  if (!instanceTransfer) throw new HttpError(400, sourceText("error.team.instanceTransferUnsupported"));
+  if (path === getTransferMapping) {
+    const input = await readAgentAccessPolicyInput(context, parseAgentAccessPolicyTransferSelection);
+    return json(200, await answer(() => runCauseEffect(instanceTransfer.getTransferMapping(input, member.id)), 409));
+  }
+  const { input, timezone } = await readAgentAccessPolicyInput(context, (body) => ({
+    input: parseAgentAccessPolicyTransferMapping(body),
+    timezone: typeof body.timezone === "string" ? body.timezone : undefined,
+  }));
+  if (path === previewTransferMapping) {
+    return json(
+      200,
+      await answer(() => runCauseEffect(instanceTransfer.previewTransferMapping(input, member.id)), 409),
+    );
+  }
+  if (path === applyTransferMapping) {
+    if (newAgentHidden()) throw new HttpError(400, sourceText("error.team.newAgentProviderLocalOnly"));
+    const result = await answer(
+      () =>
+        runCauseEffect(
+          instanceTransfer.applyTransferMapping(input, member.id, timezone, {
+            id: member.id,
+            name: member.name ?? "Team member",
+          }),
+        ),
+      409,
+    );
+    return json(200, { ...result, agents: result.agents.map(({ id, name }) => ({ agentId: id, name })) });
+  }
+  return "unmatched";
+}
 
 /**
  * The server's agents and server settings to or from an OpenBot transfer file. Only an owner or an

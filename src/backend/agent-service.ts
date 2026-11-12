@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
 import { join } from "node:path";
+import type { AgentAccessPolicyCreateChoice } from "@openbot/contracts/agent-access-policy";
 import { agentProviderDescriptor, customAgentIdOfModel } from "@openbot/contracts/agent-providers";
 import { sortConversationMessages } from "@openbot/contracts/conversation-order";
 import { developmentStartingModel } from "@openbot/contracts/development-defaults";
@@ -130,6 +131,7 @@ import {
   DEFAULT_CUSTOM_PROVIDER_HARNESS,
   DEFAULT_PROVIDER_ACCOUNT_ID,
   DEFAULT_RESPONSE_STYLE,
+  GITHUB_CONNECTOR_MCP_SERVER_ID,
   isContextResetMarker,
   isCustomProviderHarness,
   MODEL_SWITCH_ITEM_TYPES,
@@ -151,6 +153,7 @@ import { sourceText } from "@openbot/i18n/source";
 import { createOpenBotLogger } from "@openbot/logging";
 import { classifyFailure } from "@openbot/telemetry";
 import { Cause, Deferred, Effect, Exit, Fiber, Result, Schema, Scope, Semaphore } from "effect";
+import { AgentAccessPolicyController } from "./agent/agent-access-policy";
 import { AgentMemories } from "./agent/agent-memories";
 import { AgentRemoval, AgentRemovalFailed } from "./agent/agent-removal";
 import { AgentSettingsRefused } from "./agent/agent-settings-refused";
@@ -266,6 +269,7 @@ import { ChannelRoutineScheduler } from "./channel-routine-scheduler";
 import { ChannelService } from "./channel-service";
 import type { BundledProviderExecutables } from "./cli";
 import type { ConversationMarkerExclusions } from "./conversation-read-store";
+import type { AgentAccessPolicyMembership } from "./database/agent-access-policy-store";
 import type { ProviderSession } from "./database/provider-sessions";
 import { reportOriginalFailure } from "./effect-boundary";
 import type { HostMemory } from "./host-memory";
@@ -560,6 +564,7 @@ export class AgentService extends EventEmitter<AgentServiceEvents> {
   /** Agent and channel routines of every trigger kind, with their webhook routes. */
   readonly routineRecords: RoutineRecords;
   readonly #mcp: McpGateway;
+  readonly agentAccessPolicy: AgentAccessPolicyController;
   readonly #providers: ProviderRuntime;
   readonly #providerUseChanges = Semaphore.makeUnsafe(1);
   readonly #endpoints: CustomEndpoints;
@@ -635,17 +640,40 @@ export class AgentService extends EventEmitter<AgentServiceEvents> {
     // First of the sub-objects, because `#emitError` reads it to redact and every one of them is
     // given that callback.
     this.#mcp = new McpGateway({
-      servers: new McpServerStore(store.database),
+      servers: new McpServerStore(store.database, undefined, (id, created) => {
+        if (created) store.agentAccessPolicies.registerConnection(id);
+        store.agentAccessPolicies.advanceRevision();
+      }),
       credentials,
       computerUseMcpServer,
       githubConnector,
       agents: () => store.list(),
+      allows: (agentId, connectionId) => this.agentAccessPolicy.allows(agentId, connectionId),
       logger,
       hooks: {
         emitError: (code, error) => this.#emitError(code, error),
         // Read late: the threads are built further down this constructor.
-        refreshAllAgentRuntimes: () => this.#threads.refreshAllAgentRuntimes(),
+        refreshAllAgentRuntimes: (connectionId) =>
+          this.#threads.refreshAgentRuntimes(
+            (id) => connectionId === undefined || this.agentAccessPolicy.allows(id, connectionId),
+          ),
       },
+    });
+    this.agentAccessPolicy = new AgentAccessPolicyController({
+      store: store.agentAccessPolicies,
+      agents: () => store.list(),
+      connections: () => this.#mcp.policyConnections(),
+      busy: (agentId) => {
+        const agent = store.list().find(({ id }) => id === agentId);
+        return (
+          agent !== undefined &&
+          (this.#threads.providerContextBusy(agent) ||
+            this.#runsTurn(agentId) ||
+            this.#turn.subagentTurns(new Set([agentId])).length > 0)
+        );
+      },
+      refresh: (agentId, startingDeliveryIds) => this.#threads.refreshAccessPolicyRuntime(agentId, startingDeliveryIds),
+      invalidate: (agentId) => this.#mcp.invalidateAgentRoutes(agentId),
     });
     this.#sidebarLayout = sidebarLayout;
     this.#profileSave = new ProfileSave(store, {
@@ -1065,7 +1093,7 @@ export class AgentService extends EventEmitter<AgentServiceEvents> {
         // Every MCP set that leaves for a provider is remembered, so its secrets stay redactable
         // after the user edits them. This is the second of the two ways one leaves; the other is
         // `enabledMcpServers`, which the Codex thread configuration reads.
-        mcpServers: () => this.#mcp.record(credentials.mcpServers()),
+        mcpServers: (agentId) => (agentId === null ? [] : this.enabledMcpServers(agentId)),
         reportMcpDrops: (provider, drops) => this.#mcp.reportDrops(provider, drops),
         mcpEndpoint: (config, agentId) => this.#mcp.endpoint(config, agentId).pipe(toMcpOperationError),
       },
@@ -1235,7 +1263,8 @@ export class AgentService extends EventEmitter<AgentServiceEvents> {
       conversation: this.#conversation,
       memories: this.#memories,
       compaction: this.#compaction,
-      mcpServers: () => this.#mcp.enabled(),
+      mcpServers: (agentId) => (agentId === null ? [] : this.enabledMcpServers(agentId)),
+      accessPolicy: this.agentAccessPolicy,
       mcpToolRuntimes: () => this.#mcp.toolRuntimes(),
       mcpEndpoint: (config, agentId) => this.#mcp.endpoint(config, agentId).pipe(toMcpOperationError),
       mcpProxyFingerprint: (configs) => this.#mcp.proxyFingerprint(configs).pipe(toMcpOperationError),
@@ -1835,9 +1864,14 @@ export class AgentService extends EventEmitter<AgentServiceEvents> {
       ...(options.visualPreview === undefined ? {} : { visualPreview: options.visualPreview }),
       ...(options.screenCapture === undefined ? {} : { screenCapture: options.screenCapture }),
       ...(options.videoReader === undefined ? {} : { videoReader: options.videoReader }),
-      mcpServers: mcpServersFromGateway(this.#mcp, options.prepareMcpTest),
+      mcpServers: (agentId) =>
+        mcpServersFromGateway(this.#mcp, options.prepareMcpTest, {
+          permits: (id) => this.agentAccessPolicy.permits(agentId, id),
+          allows: (id) => this.agentAccessPolicy.allows(agentId, id),
+          allowsNew: () => this.agentAccessPolicy.allowsNewConnection(agentId),
+        }),
       ...(options.marketplaceAppServer === undefined ? {} : { marketplaceAppServer: options.marketplaceAppServer }),
-      githubConnected: () => Boolean(githubConnector?.mcpServer()),
+      githubConnected: (agentId) => this.agentAccessPolicy.allows(agentId, GITHUB_CONNECTOR_MCP_SERVER_ID),
       feedbackFacts: options.feedbackFacts ?? null,
       feedback: options.feedback ?? null,
       serverClaims: options.serverClaims ?? null,
@@ -1850,7 +1884,7 @@ export class AgentService extends EventEmitter<AgentServiceEvents> {
         providerAccounts: (provider) => this.getStatus().providers?.find((row) => row.id === provider)?.accounts,
         providerStatuses: () => this.getStatus().providers ?? [],
         preferredProvider: () => this.preferredProvider(),
-        createAgent: (input, configure) =>
+        createAgent: (input, creatorId, configure) =>
           this.createAgent(
             input,
             configure
@@ -1862,11 +1896,16 @@ export class AgentService extends EventEmitter<AgentServiceEvents> {
                     ),
                   )
               : undefined,
+            undefined,
+            undefined,
+            false,
+            undefined,
+            creatorId,
           ).pipe(toToolOperationFailed),
         updateAgent: (input, initiatingAgentId) =>
           this.updateAgent(input, initiatingAgentId).pipe(toToolOperationFailed),
         setAvatar: (agentId, image) => this.setAvatar(agentId, image).pipe(toToolOperationFailed),
-        enabledMcpServers: () => this.enabledMcpServers(),
+        enabledMcpServers: (agentId) => this.enabledMcpServers(agentId),
         emitError: (code, error, agentId) => this.#emitError(code, error, agentId),
         redactMcp: (text) => this.#mcp.redact(text),
         redactMcpForAgent: (text) => this.#mcp.redactForAgent(text),
@@ -2360,6 +2399,16 @@ export class AgentService extends EventEmitter<AgentServiceEvents> {
     return this.#mcp.list();
   }
 
+  createMcpServerForTransfer(config: McpServerConfig): Effect.Effect<McpServerConfig, AgentLifecycleFailed> {
+    return this.#mcp
+      .createForTransfer(config)
+      .pipe(
+        Effect.mapError(
+          (failure) => new AgentLifecycleFailed({ operation: "import MCP connection", cause: failure.cause }),
+        ),
+      );
+  }
+
   saveMcpServer(input: SaveMcpServerInput): Effect.Effect<McpServerConfig[], AgentLifecycleFailed> {
     return this.#mcp
       .save(input)
@@ -2457,8 +2506,9 @@ export class AgentService extends EventEmitter<AgentServiceEvents> {
       );
   }
 
-  enabledMcpServers(): McpServerConfig[] {
-    return this.#mcp.enabled();
+  enabledMcpServers(agentId?: string): McpServerConfig[] {
+    const configs = this.#mcp.enabled();
+    return agentId === undefined ? configs : this.agentAccessPolicy.filter(agentId, configs);
   }
 
   /**
@@ -2808,6 +2858,8 @@ export class AgentService extends EventEmitter<AgentServiceEvents> {
     profileOperationId?: string,
     sender?: ConversationMessageSender,
     welcome = false,
+    policy?: AgentAccessPolicyCreateChoice,
+    creatorId?: string,
   ) {
     const initialMessage = yield* lifecycleStep("validate initial message", () => {
       const text = input.initialMessage.trim();
@@ -2817,7 +2869,15 @@ export class AgentService extends EventEmitter<AgentServiceEvents> {
       return text;
     });
     let agent = yield* this.#store
-      .createAgent(input, profileOperationId)
+      .createAgent(
+        input,
+        profileOperationId,
+        policy
+          ? () => this.agentAccessPolicy.forCreation(policy)
+          : creatorId
+            ? () => this.agentAccessPolicy.restriction(creatorId)
+            : undefined,
+      )
       .pipe(
         Effect.mapError((failure) => new AgentLifecycleFailed({ operation: "create agent", cause: failure.cause })),
       );
@@ -2955,9 +3015,10 @@ export class AgentService extends EventEmitter<AgentServiceEvents> {
   readonly createAgentProfile = Effect.fn("AgentService.createAgentProfile")(function* (
     this: AgentService,
     input: Omit<CreateAgentInput, "initialMessage"> & { title?: string },
+    accessPolicy?: () => AgentAccessPolicyMembership,
   ) {
     let agent = yield* this.#store
-      .createAgent(input)
+      .createAgent(input, undefined, accessPolicy)
       .pipe(
         Effect.mapError(
           (failure) => new AgentLifecycleFailed({ operation: "create agent profile", cause: failure.cause }),
@@ -3966,6 +4027,7 @@ export class AgentService extends EventEmitter<AgentServiceEvents> {
     agentId: string,
   ) {
     const externalThreadId = yield* lifecycleStep("compact agent context", () => {
+      this.agentAccessPolicy.assertReady(agentId);
       const agent = this.#conversation.requireKnownAgent(agentId);
       const activeTurn =
         this.#conversation.workingSnapshot(agentId)?.activeTurnId ??
@@ -3992,6 +4054,7 @@ export class AgentService extends EventEmitter<AgentServiceEvents> {
     input: AgentTaskInput,
   ) {
     const externalThreadId = yield* lifecycleStep("compact task context", () => {
+      this.agentAccessPolicy.assertReady(input.agentId);
       const agent = this.#conversation.requireKnownAgent(input.agentId);
       const task = this.#tasks.requireOpen(input.agentId, input.taskId);
       const session = this.#store.database.activeProviderSession(task.threadId, agent.provider);
@@ -4268,6 +4331,14 @@ export class AgentService extends EventEmitter<AgentServiceEvents> {
       );
     yield* lifecycleStep("restore channel links", () => {
       this.#mcp.migrateCatalogRows();
+      this.#store.agentAccessPolicies.transaction(() => {
+        const policies = this.#store.agentAccessPolicies;
+        let registered = false;
+        for (const { id } of this.#mcp.policyConnections()) {
+          if (policies.registerConnection(id)) registered = true;
+        }
+        if (registered) policies.advanceRevision();
+      });
       this.channels.restoreDeliveryLinks();
       this.channels.removeDeletedMembers(new Set(this.#store.list().map((agent) => agent.id)));
     });

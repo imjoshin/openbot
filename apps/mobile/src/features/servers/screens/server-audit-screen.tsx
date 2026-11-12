@@ -54,6 +54,7 @@ function changeMark(change: ServerAuditChange): { Icon: typeof Crown; tone: Tone
       return { Icon: Pencil, tone: "accent" };
     case "role-deleted":
       return { Icon: Trash, tone: "danger" };
+    case "agent-access-policy":
     case "agent-level":
       return { Icon: KeyRound, tone: "accent" };
   }

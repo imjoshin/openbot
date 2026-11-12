@@ -94,6 +94,7 @@ export function serverSupportsCapability(
       capability === "codex-api-key-v1" ||
       capability === "host-personality-v1" ||
       capability === "agent-access-v1" ||
+      capability === "agent-access-policy-v1" ||
       capability === "sidebar-folders-v1" ||
       capability === "server-audit-v1" ||
       capability === "discord-access-v1" ||

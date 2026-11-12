@@ -8,6 +8,7 @@ import {
   type AgentProviderId,
   COMPUTER_USE_MCP_SERVER_ID,
   COMPUTER_USE_MCP_SERVER_NAME,
+  GITHUB_CONNECTOR_MCP_SERVER_ID,
   isReservedMcpServerName,
   type McpServerConfig,
   type McpTransport,
@@ -24,7 +25,7 @@ import { getRecord } from "./protocol";
 const execFileAsync = promisify(execFile);
 
 /** Where a provider client reads the enabled configurations at spawn. */
-export type McpServerSource = () => readonly McpServerConfig[];
+export type McpServerSource = (agentId?: string | null) => readonly McpServerConfig[];
 
 /**
  * What OpenBot can lend a machine that does not have it: the `bin` directories of the tool runtimes
@@ -605,6 +606,7 @@ export type CodexOwnTransports = Readonly<Record<string, McpTransport>>;
 export interface CodexOwnServers {
   disabled: Record<string, CodexDisabledMcpServer>;
   transports: CodexOwnTransports;
+  approvalPlaceholders: ReadonlySet<string>;
   /** The `config/read` answer with its layers, or null without one. */
   read: DynamicRecord | null;
 }
@@ -633,6 +635,14 @@ export const codexDisabledServers = Effect.fn("McpShape.codexDisabledServers")(f
       }),
     ),
     transports: codexOwnTransports(configured),
+    approvalPlaceholders: new Set(
+      Object.entries(configured ?? {}).flatMap(([name, entry]) => {
+        if (!isDynamicRecord(entry) || entry.enabled !== false) return [];
+        const stdio = entry.command === CODEX_PLACEHOLDER_COMMAND && entry.url == null;
+        const http = entry.url === CODEX_PLACEHOLDER_URL && entry.command == null;
+        return stdio || http ? [name] : [];
+      }),
+    ),
     read: config,
   };
 });
@@ -769,6 +779,7 @@ export function mcpFingerprintValues(configs: readonly McpServerConfig[]): strin
     .filter((config) => config.enabled && !isReservedMcpServerName(config.name))
     .map((config) =>
       [
+        config.id,
         config.name,
         config.transport,
         config.command,
@@ -776,7 +787,7 @@ export function mcpFingerprintValues(configs: readonly McpServerConfig[]): strin
         config.envPassthrough.join("\u0000"),
         config.env.map((pair) => pair.key).join("\u0000"),
         config.workingDirectory,
-        config.url,
+        config.id === GITHUB_CONNECTOR_MCP_SERVER_ID ? "" : config.url,
         config.headers.map((pair) => pair.key).join("\u0000"),
         secretDigest(config),
       ].join("\u0001"),

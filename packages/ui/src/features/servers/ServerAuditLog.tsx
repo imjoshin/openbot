@@ -66,6 +66,7 @@ function category(change: ServerAuditChange): Exclude<AuditFilter, "all"> {
     case "member-removed":
     case "member-role":
       return "members";
+    case "agent-access-policy":
     case "agent-level":
       return "agents";
     default:
@@ -127,6 +128,8 @@ function changeLine(entry: ServerAuditEntry, t: AppTranslate, show: (value: Valu
       const values = { member: show(member(change.member)), role: show(role(change.role.name)) };
       return change.added ? t("server.audit.roleMemberAdded", values) : t("server.audit.roleMemberRemoved", values);
     }
+    case "agent-access-policy":
+      return t("server.audit.agentAccessPolicy");
     case "agent-level":
       return t("server.audit.agentLevel", {
         agent: show({ kind: "agent", agent: change.agent }),
@@ -160,6 +163,7 @@ function changeMark(change: ServerAuditChange): { icon: () => JSX.Element; tone:
       return { icon: () => <Pencil />, tone: "accent" };
     case "role-deleted":
       return { icon: () => <Trash2 />, tone: "danger" };
+    case "agent-access-policy":
     case "agent-level":
       return { icon: () => <KeyRound />, tone: "accent" };
   }

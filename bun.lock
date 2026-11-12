@@ -284,6 +284,7 @@
       "name": "@openbot/contracts",
       "version": "0.0.0",
       "dependencies": {
+        "effect": "catalog:",
         "emoji-regex": "10.6.0",
         "fflate": "catalog:",
         "marked": "catalog:",

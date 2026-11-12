@@ -32,6 +32,7 @@ import {
 import { isString } from "@openbot/contracts/runtime-values";
 import { TEAM_API_ROUTES } from "@openbot/contracts/team-api-routes";
 import { ACP_REGISTRY_CAPABILITY } from "@openbot/contracts/team-protocol/acp-registry-v1";
+import { AGENT_ACCESS_POLICY_CAPABILITY } from "@openbot/contracts/team-protocol/agent-access-policy-v1";
 import { AGENT_ACCESS_CAPABILITY } from "@openbot/contracts/team-protocol/agent-access-v1";
 import { AGENT_BACKUP_MODELS_CAPABILITY } from "@openbot/contracts/team-protocol/agent-backup-models-v1";
 import { AGENT_COLORS_CAPABILITY } from "@openbot/contracts/team-protocol/agent-colors-v1";
@@ -245,6 +246,7 @@ import { RemoteWorkflowError, remoteCall, toRemoteWorkflowError } from "./remote
 import { isClientUse } from "./team-api/client-use";
 import type { TeamApiOptions, TeamApiSidebarLayout } from "./team-api/dependencies";
 import { HttpError } from "./team-api/http-error";
+import { hasMcpMemberAccess } from "./team-api/mcp-member-access";
 import {
   hiddenAgentView,
   hiddenProviderAgentIds,
@@ -265,6 +267,7 @@ import {
 } from "./team-api/request-helpers";
 import { routeAcpRegistry } from "./team-api/route-acp-registry";
 import { routeAgentAccess } from "./team-api/route-agent-access";
+import { routeAgentAccessPolicy } from "./team-api/route-agent-access-policy";
 import {
   routeAgentAdmin,
   routeAgentBackupModels,
@@ -329,7 +332,7 @@ import { routeHostPersonality } from "./team-api/route-host-personality";
 import { routeHostTimezone } from "./team-api/route-host-timezone";
 import { routeHostUpdate } from "./team-api/route-host-update";
 import { routeHostedSites } from "./team-api/route-hosted-sites";
-import { routeInstanceTransfer } from "./team-api/route-instance-transfer";
+import { routeInstanceTransfer, routeInstanceTransferMapping } from "./team-api/route-instance-transfer";
 import { routeInstanceTransferChunks } from "./team-api/route-instance-transfer-chunks";
 import { routeLiveActivityPush } from "./team-api/route-live-activity-push";
 import { liveVoiceWireEvent, routeLiveVoice, TeamLiveVoiceSessions } from "./team-api/route-live-voice";
@@ -1214,6 +1217,17 @@ export class TeamApiServer {
       if ((await routeModelVisibility(context, this.#options.admin)) === "handled") return;
       if ((await routeProviderDefault(context, this.#options.admin)) === "handled") return;
       if (
+        (await routeAgentAccessPolicy(
+          context,
+          this.#options.agentAccessPolicy,
+          this.#options.serverAudit,
+          this.#options.store.getIdentity()?.serverId,
+          hidden,
+          () => this.#options.agents.listAgents(),
+        )) === "handled"
+      )
+        return;
+      if (
         (await routeAgentAccess(
           context,
           this.#options.agentAccess,
@@ -1265,6 +1279,15 @@ export class TeamApiServer {
       if ((await routeAgentImport(context, this.#options.agentImport, newAgentHidden)) === "handled") return;
       if ((await routeHermesImport(context, this.#options.hermesImport, newAgentHidden)) === "handled") return;
       if ((await routeInstanceTransfer(context, this.#options.instanceTransfer, newAgentHidden)) === "handled") return;
+      if (
+        (await routeInstanceTransferMapping(
+          context,
+          this.#options.instanceTransfer,
+          this.#options.agentAccessPolicy,
+          newAgentHidden,
+        )) === "handled"
+      )
+        return;
       if ((await routeInstanceTransferChunks(context, this.#options.instanceTransfer)) === "handled") return;
       if (
         // The ID, not the member: the registration outlives a role change.
@@ -1302,7 +1325,7 @@ export class TeamApiServer {
         expected || (error instanceof Error && isFixedSourceText(error.message))
           ? error.message
           : sourceText("error.team.requestFailed");
-      const code = error instanceof RemoteScreenError ? error.code : undefined;
+      const code = error instanceof HttpError || error instanceof RemoteScreenError ? error.code : undefined;
       if (!expected) (this.#options.logger ?? logger).error("Team API request failed:", toLogValue(error));
       // A streamed file can fail after its head is on the wire. A second head is not possible, so
       // the socket closes and the client sees an incomplete download.
@@ -1371,6 +1394,9 @@ export class TeamApiServer {
       skills: this.#options.skills,
       sidebarLayout: this.#options.sidebarLayout,
       duplicateAgent: (agentId, operationId) => this.#duplicateAgent(agentId, operationId),
+      accessPolicy: this.#options.agentAccessPolicy,
+      audit: this.#options.serverAudit,
+      serverId: this.#options.store.getIdentity()?.serverId,
       ...(this.#options.admin?.modelVisibility ? { visibleModels: this.#options.admin.modelVisibility } : {}),
     });
   }
@@ -1572,6 +1598,7 @@ export class TeamApiServer {
     memberId?: string,
   ): void {
     const filteredConversationPayloads = new Map<string, string>();
+    const namedMcpDiagnostic = broadcast.type === "error" && broadcast.code === "mcp_server_not_started";
     // The roles give each connection of one member the same agents: read them once for each member.
     const access = new Map<string, { member: AccessMember; blocked: Set<string>; key: string }>();
     const accessFor = (connection: EventClientState) => {
@@ -1586,6 +1613,7 @@ export class TeamApiServer {
 
     for (const [client, connection] of this.#eventClients) {
       if (memberId !== undefined && connection.memberId !== memberId) continue;
+      if (namedMcpDiagnostic && !this.#canReadMcpCatalog(connection)) continue;
       const event = this.#eventFor(connection, broadcast);
       // Only accounts after the first: a client reads an empty reading as no provider reporting.
       if (event !== broadcast && event.type === "usage-changed" && event.usage.limits.length === 0) continue;
@@ -2371,6 +2399,16 @@ export class TeamApiServer {
     return this.#options.store.authenticate(connection.token) ?? { id: connection.memberId, role: "member" };
   }
 
+  #canReadMcpCatalog(connection: EventClientState): boolean {
+    const { mcpServers, mcpServerOwners, store } = this.#options;
+    if (!mcpServers || !connection.capabilities.has(MCP_SERVERS_CAPABILITY)) return false;
+    const member = store.authenticate(connection.token);
+    return (
+      member !== null &&
+      (canAdministerServer(member.role) || hasMcpMemberAccess(connection.capabilities, mcpServerOwners))
+    );
+  }
+
   /**
    * Tells each client that the roles changed, then sends again what the roles filter: the agent list,
    * the runtime and the presence. A client of an older build gets only the agent list.
@@ -2545,6 +2583,7 @@ export class TeamApiServer {
           if (capability === MODEL_VISIBILITY_CAPABILITY) return this.#options.admin?.modelVisibility !== undefined;
           if (capability === PROVIDER_DEFAULT_CAPABILITY) return this.#options.admin?.defaultProvider !== undefined;
           if (capability === AGENT_ACCESS_CAPABILITY) return this.#options.agentAccess !== undefined;
+          if (capability === AGENT_ACCESS_POLICY_CAPABILITY) return this.#options.agentAccessPolicy !== undefined;
           if (capability === SERVER_AUDIT_CAPABILITY) return this.#options.serverAudit !== undefined;
           if (capability === HOST_UPDATE_CAPABILITY || capability === HOST_MEMBER_UPDATE_CAPABILITY)
             return this.#options.admin?.update !== undefined;

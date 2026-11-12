@@ -76,6 +76,7 @@ import { Effect, Result, Semaphore, Stream } from "effect";
 import { ProfileCreationRecovery } from "./agent/profile-creation-recovery";
 import { isEmptyStoredFile, parseStoredJson, writeFileAtomically } from "./atomic-json-file";
 import { automationRoot } from "./automation-command";
+import { type AgentAccessPolicyMembership, AgentAccessPolicyStore } from "./database/agent-access-policy-store";
 import type { AgentModelChange } from "./database/agent-roster";
 import { OpenBotDatabase, type ProviderSession, stableThreadId } from "./openbot-database";
 import { isPathInside } from "./path-containment";
@@ -203,6 +204,7 @@ export class AgentStore {
   readonly #automationRoot: string;
   readonly #profileCreationRecovery: ProfileCreationRecovery;
   readonly #database: OpenBotDatabase;
+  readonly agentAccessPolicies: AgentAccessPolicyStore;
   #state: StoredState = { version: 2, examplesInitialized: false, agents: [] };
   readonly #avatarUpdateQueue = Semaphore.makeUnsafe(1);
   readonly #creationQueue = Semaphore.makeUnsafe(1);
@@ -227,6 +229,7 @@ export class AgentStore {
     this.#duplicationsRoot = join(userDataPath, "agent-duplications");
     this.#automationRoot = automationRoot(userDataPath);
     this.#database = database;
+    this.agentAccessPolicies = new AgentAccessPolicyStore(database);
     this.#agentDefaults = agentDefaults;
     this.#profileCreationRecovery = new ProfileCreationRecovery(
       join(userDataPath, "agent-profile-creations"),
@@ -351,14 +354,19 @@ export class AgentStore {
     return this.#state.agents.map((agent) => ({ ...agent }));
   }
 
-  createAgent(input: Omit<CreateAgentInput, "initialMessage">, profileOperationId?: string) {
-    return this.#creationQueue.withPermit(this.#createAgent(input, profileOperationId));
+  createAgent(
+    input: Omit<CreateAgentInput, "initialMessage">,
+    profileOperationId?: string,
+    accessPolicy?: () => AgentAccessPolicyMembership,
+  ) {
+    return this.#creationQueue.withPermit(this.#createAgent(input, profileOperationId, accessPolicy));
   }
 
   #createAgent = Effect.fn("AgentStore.createAgent")(function* (
     this: AgentStore,
     input: Omit<CreateAgentInput, "initialMessage">,
     profileOperationId?: string,
+    accessPolicy?: () => AgentAccessPolicyMembership,
   ): Effect.fn.Return<AgentSummary, StoredStateFailure> {
     try {
       if (this.#state.agents.length >= INPUT_LIMITS.agents) {
@@ -377,7 +385,7 @@ export class AgentStore {
       yield* storedIO(() => mkdir(record.workspacePath, { recursive: true, mode: 0o700 }));
       this.#state.agents.unshift(record);
       try {
-        this.#persist("agent.created");
+        this.#persistNewAgent(record.id, "agent.created", accessPolicy);
       } catch (error) {
         this.#state.agents = this.#state.agents.filter((candidate) => candidate.id !== record.id);
         yield* storedIO(() => rm(record.workspacePath, { recursive: true, force: true }));
@@ -501,7 +509,10 @@ export class AgentStore {
               if (sourceAvatar) yield* storedIO(() => rename(stagedAvatarDirectory, avatarDirectory));
               this.#state.agents.unshift(record);
               try {
-                this.#persist("agent.duplicated");
+                this.#persistNewAgent(record.id, "agent.duplicated", () => {
+                  this.#requireAgent(sourceId);
+                  return this.agentAccessPolicies.membership(sourceId);
+                });
               } catch (error) {
                 this.#state.agents = this.#state.agents.filter((candidate) => candidate.id !== record.id);
                 throw error;
@@ -1126,9 +1137,14 @@ export class AgentStore {
       }
 
       const record = this.#createRecord(id, name ?? titleFromId(id), title ?? "Local teammate");
-      this.#state.agents.push(record);
       yield* storedIO(() => mkdir(record.workspacePath, { recursive: true, mode: 0o700 }));
-      this.#persist("agent.created");
+      this.#state.agents.push(record);
+      try {
+        this.#persistNewAgent(record.id, "agent.created");
+      } catch (cause) {
+        this.#state.agents = this.#state.agents.filter((candidate) => candidate.id !== id);
+        throw cause;
+      }
       return { ...record };
     } catch (cause) {
       return yield* new StoredStateFailure({ cause });
@@ -1787,6 +1803,14 @@ export class AgentStore {
 
   #persist(eventType: string, modelChange?: AgentModelChange): void {
     this.#database.replaceAgents(`agents:${eventType}:${randomUUID()}`, this.#state.agents, eventType, modelChange);
+  }
+
+  #persistNewAgent(agentId: string, eventType: string, policy?: () => AgentAccessPolicyMembership): void {
+    this.agentAccessPolicies.transaction(() => {
+      if (policy) this.agentAccessPolicies.saveMembership(agentId, policy());
+      this.#persist(eventType);
+      this.agentAccessPolicies.advanceRevision();
+    });
   }
 
   #createRecord(id: string, name: string, title: string, description = ""): StoredAgent {

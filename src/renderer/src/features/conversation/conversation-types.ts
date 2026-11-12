@@ -208,6 +208,7 @@ export interface ConversationProps {
    * Open the Browser profiles section of the settings of the server that runs the agent. Absent for
    * a member, and for a host without `browser-profiles-v1`.
    */
+  agentAccessPolicy?: import("@openbot/ui/features/servers/AgentGroups").AgentMcpPermissionsOptions | undefined;
   onManageBrowserProfiles?: ((trigger: HTMLElement) => void) | undefined;
   /** Opens the notification settings at a server, where the user changes the level of its agents. */
   onOpenNotificationSettings?: ((serverId: string, trigger: HTMLElement) => void) | undefined;

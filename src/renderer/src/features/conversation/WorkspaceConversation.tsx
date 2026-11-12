@@ -9,6 +9,7 @@ import {
   type UpdateAgentAdminSettingsInput,
   type UpdateAgentInput,
 } from "@openbot/contracts/ipc";
+import { AGENT_ACCESS_POLICY_CAPABILITY } from "@openbot/contracts/team-protocol/agent-access-policy-v1";
 import { BROWSER_PROFILES_CAPABILITY } from "@openbot/contracts/team-protocol/browser-profiles-v1";
 import { CONVERSATION_UNREAD_FROM_CAPABILITY } from "@openbot/contracts/team-protocol/conversation-unread-from-v1";
 import { MESSAGE_DELETE_CAPABILITY } from "@openbot/contracts/team-protocol/message-delete-v1";
@@ -42,6 +43,7 @@ import { useChannels } from "../channels/channels-context";
 import { useConnectors } from "../connectors/connectors-context";
 import { useCustomAgents } from "../custom-agents/custom-agents-context";
 import { useRemoteDesktop } from "../remote-desktop/remote-desktop-context";
+import { desktopAgentAccessPolicyCalls } from "../servers/agent-access-policy-port";
 import { useServerActions } from "../servers/server-actions";
 import { remoteMcpSignIn, serverCanAdminister, serverSupportsCapability } from "../servers/server-capabilities";
 import { createServerResponseStyle } from "../servers/server-personality";
@@ -567,6 +569,16 @@ export function WorkspaceConversation(props: { account: () => CentralAuthUser })
         onSignInProvider={composerSignIn() ? connectFromComposer : undefined}
         onSignInWithCodeProvider={composerCodeSignIn() ? signInWithCode : undefined}
         onManageProviders={manageProviders() ? openProviderSettings : undefined}
+        agentAccessPolicy={(() => {
+          const host = activeServer();
+          return serverCanAdminister(host, AGENT_ACCESS_POLICY_CAPABILITY) &&
+            (host.kind === "local" || host.state === "online")
+            ? {
+                calls: desktopAgentAccessPolicyCalls(host.id),
+                onViewGroups: (trigger: HTMLElement) => openServerSettings(host.id, trigger, "agent-groups"),
+              }
+            : undefined;
+        })()}
         onManageBrowserProfiles={manageBrowserProfiles() ? openBrowserProfileSettings : undefined}
         onOpenNotificationSettings={openNotificationLevels}
         agent={conversationAgent()}

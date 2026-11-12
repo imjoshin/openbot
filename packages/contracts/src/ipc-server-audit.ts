@@ -32,6 +32,7 @@ export type ServerAuditChange =
   | { kind: "role-renamed"; roleId: string; from: string; to: string }
   | { kind: "role-deleted"; role: ServerAuditName }
   | { kind: "role-member"; role: ServerAuditName; member: ServerAuditName; added: boolean }
+  | { kind: "agent-access-policy" }
   /** `role` null is the levels that apply to every member. */
   | {
       kind: "agent-level";
@@ -90,6 +91,8 @@ const isLevel = (value: unknown): value is AgentAccessLevel => isOneOf(AGENT_ACC
 function decodeChange(value: unknown): ServerAuditChange | null {
   if (!isDynamicRecord(value)) throw new Error("Invalid server audit change.");
   switch (value.kind) {
+    case "agent-access-policy":
+      return { kind: value.kind };
     case "member-joined":
       if (isName(value.member) && isMemberRole(value.role))
         return { kind: value.kind, member: copyName(value.member), role: value.role };

@@ -53,6 +53,7 @@ import {
 } from "@/features/agents/components/agent-host-fields";
 import { AgentInformation } from "@/features/agents/components/agent-information";
 import { AgentInstructionsFileEditor } from "@/features/agents/components/agent-instructions-file";
+import { AgentMcpPermissions } from "@/features/agents/components/agent-mcp-permissions";
 import { type AgentPhotoDraft, AgentPhotoPicker } from "@/features/agents/components/agent-photo-picker";
 import { AgentPublish } from "@/features/agents/components/agent-publish";
 import { AgentRuntimeFields, useProviderAccounts } from "@/features/agents/components/agent-runtime-fields";
@@ -153,6 +154,7 @@ function AgentForm({
     canCompactContext,
     canManageAgentInstructions,
     canManageAgentAccess,
+    canManageAgentAccessPolicy,
     canManageAgentHostSettings,
     canManageAgentTaskLimit,
     canManageAgentNewChat,
@@ -165,7 +167,10 @@ function AgentForm({
   const queryClient = useQueryClient();
   // The Permissions row shows the access, as on desktop. Its page reads the same host answer.
   const { settings: adminSettings } = useAgentAdminSettings(agent, host, available && page === "info");
-  const showPermissions = canManageAgentAccess(agent.serverId) || canManageAgentHostSettings(agent.serverId);
+  const showPermissions =
+    canManageAgentAccess(agent.serverId) ||
+    canManageAgentHostSettings(agent.serverId) ||
+    canManageAgentAccessPolicy(agent.serverId);
   const showFolders = canManageAgentFolders(agent.serverId);
   // The user's own level of the agent, on a host that keeps it for each member. Settings > Notifications
   // is the one place that changes notifications, so the agent has no switch of its own here.
@@ -464,6 +469,7 @@ function AgentForm({
         <>
           <AgentAccessFields agent={agent} server={host} available={available} />
           <AgentHostPermissionFields agent={agent} server={host} available={available} />
+          <AgentMcpPermissions key={`${agent.serverId}:${agent.id}`} agentId={agent.id} serverId={agent.serverId} />
         </>
       ) : null}
       {page === "advanced" ? (

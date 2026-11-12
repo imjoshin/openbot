@@ -4,7 +4,10 @@ import { appLanguageOption } from "@openbot/i18n/languages";
 import type { TranslatedLocale } from "@openbot/i18n/mobile";
 
 /** A new agent as a screen asks for it. `firstTask` is what the user wrote for the agent to do first. */
-export type NewAgentInput = Omit<CreateAgentInput, "initialMessage"> & { firstTask?: string };
+export type NewAgentInput = Omit<CreateAgentInput, "initialMessage"> & {
+  firstTask?: string;
+  accessPolicy?: { serverId: string; policyId: string; expectedRevision: number };
+};
 
 /**
  * The first message of a new agent. A host with `agent-welcome-v1` hides it, so it is a setup message

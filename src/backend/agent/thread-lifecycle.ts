@@ -49,6 +49,7 @@ import {
 } from "../mcp-provider-shapes";
 import { decodeRecordResponse, decodeThreadResponse, getRecord, getString, type ResponseDecoder } from "../protocol";
 import { TimeoutError, withTimeout } from "../with-timeout";
+import type { AgentAccessPolicyController } from "./agent-access-policy";
 import type { AgentMemories } from "./agent-memories";
 import { readCodexMcpConfig } from "./codex-mcp-config";
 import { type CodexPromptSettings, codexPromptSettings } from "./codex-prompt-settings";
@@ -109,7 +110,12 @@ const logger = createOpenBotLogger("thread-lifecycle");
 const CODEX_MCP_ADAPTER_VERSION = 10;
 
 /** What a provider other than Codex, or a Codex with no file to read, has in its own files. */
-const NO_CODEX_OWN_SERVERS: CodexOwnServers = { disabled: {}, transports: {}, read: null };
+const NO_CODEX_OWN_SERVERS: CodexOwnServers = {
+  disabled: {},
+  transports: {},
+  approvalPlaceholders: new Set(),
+  read: null,
+};
 
 /**
  * Providers whose client starts its process again with the MCP servers and skills of that moment
@@ -190,6 +196,7 @@ export interface ThreadLifecycleOptions {
    * configuration, while Claude and the ACP clients read the same source themselves at spawn.
    */
   mcpServers?: McpServerSource;
+  accessPolicy?: AgentAccessPolicyController;
   mcpToolRuntimes?: McpToolRuntimeSource;
   mcpEndpoint?: McpEndpointSource;
   /** What the tool manifest records about the OAuth proxy for a set. See `McpGateway.proxyFingerprint`. */
@@ -246,6 +253,7 @@ export class ThreadLifecycle {
   readonly #compaction: ContextCompaction;
   readonly #hooks: ThreadLifecycleHooks;
   readonly #mcpServers: McpServerSource;
+  readonly #accessPolicy: AgentAccessPolicyController | undefined;
   readonly #mcpToolRuntimes: McpToolRuntimeSource | undefined;
   readonly #mcpEndpoint: McpEndpointSource | undefined;
   readonly #mcpProxyFingerprint: (
@@ -303,6 +311,7 @@ export class ThreadLifecycle {
     this.#compaction = options.compaction;
     this.#hooks = options.hooks;
     this.#mcpServers = options.mcpServers ?? (() => []);
+    this.#accessPolicy = options.accessPolicy;
     this.#mcpToolRuntimes = options.mcpToolRuntimes;
     this.#mcpEndpoint = options.mcpEndpoint;
     this.#mcpProxyFingerprint = options.mcpProxyFingerprint ?? (() => Effect.succeed(null));
@@ -355,13 +364,18 @@ export class ThreadLifecycle {
    * thread or its history - the same mechanism an installed skill uses. An agent that is mid-turn
    * keeps its mark, and the drain scheduler spends it when that turn ends.
    */
-  readonly refreshAllAgentRuntimes = Effect.fn("ThreadLifecycle.refreshAllAgentRuntimes")(function* (
+  refreshAllAgentRuntimes() {
+    return this.refreshAgentRuntimes(() => true);
+  }
+
+  readonly refreshAgentRuntimes = Effect.fn("ThreadLifecycle.refreshAgentRuntimes")(function* (
     this: ThreadLifecycle,
+    includes: (agentId: string) => boolean,
   ) {
-    for (const agent of this.#store.list()) {
-      this.#pendingRuntimeRefreshes.add(agent.id);
-      yield* this.applyPendingRuntimeRefresh(agent);
-    }
+    const agents = this.#store.list().filter((agent) => includes(agent.id));
+    // Mark every affected agent before a provider release yields to another start.
+    for (const agent of agents) this.#pendingRuntimeRefreshes.add(agent.id);
+    for (const agent of agents) yield* this.applyPendingRuntimeRefresh(agent);
   }, Effect.uninterruptible).bind(this);
 
   consumePendingHandoff(threadId: string): string | undefined {
@@ -504,6 +518,7 @@ export class ThreadLifecycle {
     client: AgentClient,
     executionThreadId?: string,
   ) {
+    yield* this.prepareAccessPolicyStart(agent.id);
     const publicThreadId =
       executionThreadId ?? (yield* this.#store.ensureThreadId(agent.id).pipe(toThreadOperationFailed));
     if (executionThreadId) this.#conversation.registerExecutionThread(agent.id, executionThreadId);
@@ -570,6 +585,7 @@ export class ThreadLifecycle {
    * does not hold a context change of the agent's own chat.
    */
   holdRuntimeRefresh(agentId: string, sideThread = false): () => void {
+    this.#accessPolicy?.assertReady(agentId);
     const counts = sideThread ? [this.#pendingStarts] : [this.#pendingStarts, this.#pendingMainStarts];
     for (const count of counts) count.set(agentId, (count.get(agentId) ?? 0) + 1);
     let released = false;
@@ -582,6 +598,14 @@ export class ThreadLifecycle {
         else count.delete(agentId);
       }
     };
+  }
+
+  prepareAccessPolicyStart(agentId: string, startingDeliveryIds?: ReadonlySet<string>) {
+    return (
+      this.#accessPolicy
+        ?.ensureReady(agentId, startingDeliveryIds)
+        .pipe(Effect.mapError((cause) => new ThreadOperationFailed({ cause }))) ?? Effect.void
+    );
   }
 
   /**
@@ -648,7 +672,7 @@ export class ThreadLifecycle {
     reason?: "configuration-change" | "missing-session",
   ) {
     return yield* Effect.acquireUseRelease(
-      Effect.sync(() => this.holdRuntimeRefresh(agent.id, this.#conversation.isSideThread(publicThreadId))),
+      threadStep(() => this.holdRuntimeRefresh(agent.id, this.#conversation.isSideThread(publicThreadId))),
       () => this.#startProviderThread(agent, client, publicThreadId, reason),
       (release) => Effect.sync(release),
     );
@@ -667,6 +691,7 @@ export class ThreadLifecycle {
     client: AgentClient,
     routineThreadId?: string,
   ) {
+    yield* threadStep(() => this.#accessPolicy?.assertReady(owner.id));
     const chatThreadId = yield* this.#store.ensureThreadId(owner.id).pipe(toThreadOperationFailed);
     const publicThreadId = routineThreadId ?? chatThreadId;
     const handoff = yield* threadStep(() => {
@@ -848,7 +873,16 @@ export class ThreadLifecycle {
           const approvals = this.#toolApprovals(mcpServers, own);
           yield* this.#writeToolManifest(
             externalThreadId,
-            this.toolFingerprint(agent, mcpServers, own, approvals, toolRuntimes, environment, proxy, instructionsFile),
+            this.toolFingerprint(
+              agent,
+              mcpServers,
+              codexFingerprintServerKeys(own, approvals),
+              approvals,
+              toolRuntimes,
+              environment,
+              proxy,
+              instructionsFile,
+            ),
             approvals,
           );
         }
@@ -1102,9 +1136,8 @@ export class ThreadLifecycle {
    * secret values to a digest first, so the file this string is written to holds none of them.
    *
    * The names swept out of `~/.codex/config.toml` are folded in as well, and they are the reason
-   * this is not OpenBot's set alone: a user who edits that file changes what the agent is given
-   * while the stored set is untouched, and a loaded session would keep the old tools with the
-   * panel saying otherwise.
+   * this is not OpenBot's set alone: changes to native entries can change how Codex merges the
+   * agent's configuration. Approval placeholders from other agents do not affect its tool set.
    *
    * The managed tool runtimes are folded in too: a session started before Bun finished downloading
    * drops its `npx` servers, while the configured set alone reads unchanged. Without the runtimes
@@ -1128,14 +1161,13 @@ export class ThreadLifecycle {
    * keeps the session. `legacySection` gives the fingerprint of a session from before that change,
    * which had the sorted ids of its section-mates: `hasCurrentToolsEffect` accepts it once.
    *
-   * The OAuth proxy goes in for the same reason as the MCP set: a session keeps the proxy address it
-   * was given, and a row that gains a sign-in moves from its own URL to a proxy route. Only a set
-   * with a proxied row adds a value.
+   * The manifest includes the stable binding for proxied connections. The same address can resume.
+   * A row that gains a sign-in moves from its own URL to a proxy route.
    */
   private toolFingerprint(
     agent: AgentSummary,
     configs: readonly McpServerConfig[],
-    { disabled }: CodexOwnServers,
+    ownServerKeys: readonly string[],
     approvals: CodexToolApprovals,
     toolRuntimes: McpToolRuntimes,
     environment: Readonly<Record<string, string>>,
@@ -1150,7 +1182,7 @@ export class ThreadLifecycle {
         JSON.stringify([
           visibleDynamicTools(agent.provider),
           mcpFingerprintValues(configs),
-          Object.keys(disabled).sort(),
+          ownServerKeys,
           // A revoked approval must also replace a loaded session with the old tool policy.
           approvals,
           [toolRuntimes.binDirectories, toolRuntimes.commandAliases],
@@ -1272,7 +1304,7 @@ export class ThreadLifecycle {
 
   /** The enabled servers this agent is given. Without Computer Use the fingerprint changes, so Codex replaces the session. */
   #agentMcpServers(agent: AgentSummary): readonly McpServerConfig[] {
-    return agentMcpServers(this.#mcpServers(), agentComputerUseEnabled(agent));
+    return agentMcpServers(this.#mcpServers(agent.id), agentComputerUseEnabled(agent));
   }
 
   /**
@@ -1334,31 +1366,47 @@ export class ThreadLifecycle {
     const instructionsFile = yield* this.#instructionsFile(agent, client);
     const newline = stored.success.indexOf("\n");
     const storedFingerprint = newline < 0 ? stored.success : stored.success.slice(0, newline);
+    const ownServerKeys = codexFingerprintServerKeys(own, approvals);
+    const legacyServerKeys = Object.keys(own.disabled).sort();
+    // Older manifests included every disabled key. Accept that hash when the list still matches.
+    const compatibleKeys =
+      ownServerKeys.length === legacyServerKeys.length ? [ownServerKeys] : [ownServerKeys, legacyServerKeys];
     // Also the form of a session from before the section-mates went with the turns, with their ids.
     // That session keeps the old list in its instructions, and its first turn sends the current one.
     const matches = (sessionApprovals: CodexToolApprovals, sections: readonly (SectionTeammates | null)[]) =>
       threadStep(() =>
-        sections.some(
-          (legacySection) =>
-            storedFingerprint ===
-            this.toolFingerprint(
-              agent,
-              configs,
-              own,
-              sessionApprovals,
-              toolRuntimes,
-              environment,
-              proxy,
-              instructionsFile,
-              legacySection,
-            ),
+        compatibleKeys.some((keys) =>
+          sections.some(
+            (legacySection) =>
+              storedFingerprint ===
+              this.toolFingerprint(
+                agent,
+                configs,
+                keys,
+                sessionApprovals,
+                toolRuntimes,
+                environment,
+                proxy,
+                instructionsFile,
+                legacySection,
+              ),
+          ),
         ),
       );
     const fingerprint = yield* threadStep(() =>
-      this.toolFingerprint(agent, configs, own, approvals, toolRuntimes, environment, proxy, instructionsFile),
+      this.toolFingerprint(
+        agent,
+        configs,
+        ownServerKeys,
+        approvals,
+        toolRuntimes,
+        environment,
+        proxy,
+        instructionsFile,
+      ),
     );
     if (storedFingerprint === fingerprint) return true;
-    if (section && (yield* matches(approvals, [section]))) {
+    if (yield* matches(approvals, section ? [null, section] : [null])) {
       yield* this.#writeToolManifest(sessionId, fingerprint, approvals);
       return true;
     }
@@ -1553,6 +1601,19 @@ export class ThreadLifecycle {
     client: AgentClient,
     externalThreadId: string,
   ) {
+    return yield* Effect.acquireUseRelease(
+      threadStep(() => this.holdRuntimeRefresh(agent.id)),
+      () => this.#resumeThread(agent, client, externalThreadId),
+      (release) => Effect.sync(release),
+    );
+  }).bind(this);
+
+  readonly #resumeThread = Effect.fn("ThreadLifecycle.resumeProviderThread")(function* (
+    this: ThreadLifecycle,
+    agent: AgentSummary,
+    client: AgentClient,
+    externalThreadId: string,
+  ) {
     const releasing = this.#idleReleases.get(externalThreadId);
     if (releasing) yield* Deferred.await(releasing);
     this.#conversation.bindThread(externalThreadId, agent.id);
@@ -1732,6 +1793,21 @@ export class ThreadLifecycle {
     return agent.threadId !== null && this.#activeTurnOf(agent.id, agent.threadId) !== null;
   }
 
+  /** Removes stale provider sessions before a policy refresh marker can be cleared. */
+  readonly refreshAccessPolicyRuntime = Effect.fn("ThreadLifecycle.refreshAccessPolicyRuntime")(function* (
+    this: ThreadLifecycle,
+    agentId: string,
+    startingDeliveryIds: ReadonlySet<string> = new Set(),
+  ) {
+    if (this.#pendingStarts.has(agentId) || !this.#compaction.mayDrain(agentId)) return false;
+    if (this.#mailbox.startingDeliveriesForAgent(agentId).some(({ delivery }) => !startingDeliveryIds.has(delivery.id)))
+      return false;
+    const threadIds = this.#store.database.activeProviderSessionThreads(agentId);
+    if (threadIds.some((threadId) => this.#activeTurnOf(agentId, threadId) !== null)) return false;
+    for (const threadId of threadIds) yield* this.#refreshThreadRuntime(threadId, null, true);
+    return true;
+  }, Effect.uninterruptible).bind(this);
+
   /**
    * As `providerContextBusy`, for the agent's own chat alone: a task or channel thread that starts a
    * turn or compacts its own session does not hold a change to the chat's context.
@@ -1779,21 +1855,28 @@ export class ThreadLifecycle {
     this: ThreadLifecycle,
     threadId: string,
     reloadProvider: AgentProvider | null = null,
+    strict = false,
   ) {
     const sessions = this.#store.database.listProviderSessions(threadId).filter((one) => one.state === "active");
     if (reloadProvider && sessions.length > 0 && sessions.every((one) => one.provider === reloadProvider)) {
       for (const session of sessions) {
-        yield* this.#releaseProviderSession(session.externalSessionId, undefined, true);
+        const client = this.#conversation.openClientFor(session.externalSessionId);
+        // A concurrent drain can resume this same ID while the old process closes.
         this.#conversation.unloadThread(session.externalSessionId);
+        yield* this.#releaseProviderSession(session.externalSessionId, client, true);
       }
       return;
+    }
+    if (strict) {
+      for (const session of sessions)
+        yield* this.#releaseProviderSession(session.externalSessionId, undefined, false, true);
     }
     this.#store.database.deactivateProviderSessions(threadId);
     for (const session of sessions) {
       // The client first, while the routing entry below still names it. Dropping the entry alone
       // would leave the old session open inside the client with the MCP servers it spawned, so each
       // further change would add a set of processes the user can no longer reach.
-      yield* this.#releaseProviderSession(session.externalSessionId);
+      if (!strict) yield* this.#releaseProviderSession(session.externalSessionId);
       this.#conversation.unbindThread(session.externalSessionId);
       this.#conversation.unloadThread(session.externalSessionId);
       this.#compaction.forgetThread(session.externalSessionId);
@@ -1811,14 +1894,17 @@ export class ThreadLifecycle {
     externalThreadId: string,
     client: AgentClient | undefined = this.#conversation.openClientFor(externalThreadId),
     resumes = false,
+    strict = false,
   ) {
     this.#givenTurnContext.delete(externalThreadId);
     if (!client?.releaseThread) return;
-    yield* client
-      .releaseThread(externalThreadId, resumes)
-      .pipe(
-        Effect.catch((failure) => Effect.sync(() => this.#hooks.logReleaseFailure(client.provider, failure.cause))),
-      );
+    yield* client.releaseThread(externalThreadId, resumes).pipe(
+      Effect.catch((failure) => {
+        this.#hooks.logReleaseFailure(client.provider, failure.cause);
+        if (strict) return Effect.die(failure);
+        return Effect.void;
+      }),
+    );
   }, Effect.uninterruptible);
 
   /** The saved steps of a session, or `null` when no capture is available. */
@@ -1929,6 +2015,13 @@ export class ThreadOperationFailed extends Schema.TaggedError<ThreadOperationFai
 }) {}
 
 const { io: threadIo, sync: threadStep, rewrap: toThreadOperationFailed } = causeHelpers(ThreadOperationFailed);
+
+function codexFingerprintServerKeys(own: CodexOwnServers, approvals: CodexToolApprovals): string[] {
+  const relevantKeys = new Set(approvals.map(([name]) => name));
+  return Object.keys(own.disabled)
+    .filter((name) => !own.approvalPlaceholders.has(name) || relevantKeys.has(name))
+    .sort();
+}
 
 /** The approvals of a manifest this app wrote, or null for any other value. */
 function decodeToolApprovals(value: unknown): CodexToolApprovals | null {

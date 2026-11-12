@@ -63,6 +63,8 @@ export interface InstanceTransferViewProps {
   preview: InstanceTransferPreview | null;
   result: InstanceTransferResult | null;
   importError: string | null;
+  mappingActive?: boolean | undefined;
+  mapping?: JSX.Element;
   onChoose: () => void;
   onImport: (keys: string[], includeSettings: boolean) => void;
   onCancelImport: () => void;
@@ -341,13 +343,18 @@ function ImportScreen(props: InstanceTransferViewProps) {
       {/* Keyed, so a newly chosen file starts with every agent selected again. */}
       <Show when={props.importPhase !== "idle" && props.importPhase !== "done" && props.preview} keyed>
         {(preview) => (
-          <ImportReview
-            preview={preview}
-            importing={props.importPhase === "importing"}
-            error={props.importError}
-            onImport={props.onImport}
-            onCancel={props.onCancelImport}
-          />
+          <>
+            <div hidden={props.mappingActive}>
+              <ImportReview
+                preview={preview}
+                importing={props.importPhase === "importing"}
+                error={props.importError}
+                onImport={props.onImport}
+                onCancel={props.onCancelImport}
+              />
+            </div>
+            {props.mapping}
+          </>
         )}
       </Show>
       <Show when={props.importPhase === "done" && props.result}>

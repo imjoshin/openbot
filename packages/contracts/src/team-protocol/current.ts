@@ -3,6 +3,7 @@ import { CHANNEL_DELETE_CAPABILITY, CHANNEL_TASK_CANCEL_CAPABILITY } from "../ip
 import { MCP_SERVERS_CAPABILITY } from "../ipc-mcp-servers";
 import { STORAGE_CAPABILITY } from "../ipc-storage";
 import { ACP_REGISTRY_CAPABILITY } from "./acp-registry-v1";
+import { AGENT_ACCESS_POLICY_CAPABILITY } from "./agent-access-policy-v1";
 import { AGENT_ACCESS_CAPABILITY } from "./agent-access-v1";
 import { AGENT_ADMIN_CAPABILITY } from "./agent-admin-v1";
 import { AGENT_BACKUP_MODELS_CAPABILITY } from "./agent-backup-models-v1";
@@ -224,6 +225,7 @@ export const TEAM_QUEUE_WINDOW_CAPABILITY = "queue-window-v1";
 export {
   ACP_REGISTRY_CAPABILITY,
   AGENT_ACCESS_CAPABILITY,
+  AGENT_ACCESS_POLICY_CAPABILITY,
   AGENT_ADMIN_CAPABILITY,
   AGENT_BACKUP_MODELS_CAPABILITY,
   AGENT_COLORS_CAPABILITY,
@@ -562,6 +564,7 @@ export const TEAM_CURRENT_CAPABILITIES = [
   PROVIDER_ACCOUNT_MODELS_CAPABILITY,
   CHANNEL_BROWSER_CAPABILITY,
   STORAGE_CHANNEL_CAPABILITY,
+  AGENT_ACCESS_POLICY_CAPABILITY,
 ] as const;
 
 export type TeamCurrentCapability = (typeof TEAM_CURRENT_CAPABILITIES)[number];
@@ -766,7 +769,8 @@ export const TEAM_BOOTSTRAP_CAPABILITIES = TEAM_CURRENT_CAPABILITIES.filter(
     capability !== CLAUDE_COMPACT_WINDOW_CAPABILITY &&
     capability !== PROVIDER_ACCOUNT_MODELS_CAPABILITY &&
     capability !== CHANNEL_BROWSER_CAPABILITY &&
-    capability !== STORAGE_CHANNEL_CAPABILITY,
+    capability !== STORAGE_CHANNEL_CAPABILITY &&
+    capability !== AGENT_ACCESS_POLICY_CAPABILITY,
 );
 /**
  * The capabilities that only a protocol 9 peer sends and gets. Protocols 7 and 8 read at most 128
@@ -847,6 +851,7 @@ export const TEAM_PROTOCOL_V9_ONLY_CAPABILITIES: ReadonlySet<string> = new Set<T
   PROVIDER_ACCOUNT_MODELS_CAPABILITY,
   CHANNEL_BROWSER_CAPABILITY,
   STORAGE_CHANNEL_CAPABILITY,
+  AGENT_ACCESS_POLICY_CAPABILITY,
 ]);
 // A v8 host reads at most 128 capabilities, so a client sends the protocol 9 ones only after it
 // negotiates protocol 9.
@@ -1010,6 +1015,7 @@ export function legacyTeamCapabilities(capabilities: readonly string[]): string[
       capability !== CLAUDE_COMPACT_WINDOW_CAPABILITY &&
       capability !== PROVIDER_ACCOUNT_MODELS_CAPABILITY &&
       capability !== CHANNEL_BROWSER_CAPABILITY &&
-      capability !== STORAGE_CHANNEL_CAPABILITY,
+      capability !== STORAGE_CHANNEL_CAPABILITY &&
+      capability !== AGENT_ACCESS_POLICY_CAPABILITY,
   );
 }

@@ -1,7 +1,7 @@
 // The built-in GitHub connection of this computer: one sign-in to the GitHub App, shared by every
 // agent as the GitHub MCP server and as the credential that `gh` and `git` read.
 
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { chmod, mkdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import {
@@ -21,6 +21,7 @@ import { createOpenBotLogger, redactText, registerSecretValue, toLogValue } from
 import { Deferred, Effect, Exit, type Layer, Result, Scope, Semaphore } from "effect";
 import { z } from "zod";
 import { writeFileAtomically } from "../backend/atomic-json-file";
+import { mcpOAuthProxyAgentKey } from "../backend/mcp-oauth-proxy";
 import { GitHubBotTokens } from "./github-bot-tokens";
 import type { GitHubAppConfig } from "./github-connector-config";
 import type { GitHubConnectorRecord, GitHubConnectorStore } from "./github-connector-store";
@@ -87,6 +88,7 @@ export interface GitHubConnectorServiceOptions {
   openExternal: (url: string) => Promise<void>;
   fetch?: GitHubFetch;
   now?: () => number;
+  allowsMcpAgentKey?: (agentKey: string) => boolean;
 }
 
 interface PendingSignIn {
@@ -118,6 +120,7 @@ export class GitHubConnectorService {
   readonly #operations = new Set<Deferred.Deferred<void>>();
   readonly #fetch: GitHubFetch;
   readonly #now: () => number;
+  readonly #allowsMcpAgentKey: GitHubConnectorServiceOptions["allowsMcpAgentKey"];
   readonly #statusListeners = new Set<(status: GitHubConnectorStatus) => void>();
   readonly #accessListeners = new Set<() => void>();
   #pending: PendingSignIn | null = null;
@@ -143,10 +146,11 @@ export class GitHubConnectorService {
   #renewingBotTokens: Deferred.Deferred<void, GitHubOperationError> | null = null;
   /** The content of the repositories file, or null when it is not there. */
   #repositoriesWritten: string | null = null;
-  /** Null when the loopback server could not start: agents then reach GitHub's server with the user token. */
+  /** Null when the loopback server could not start. */
   #mcpProxy: GitHubMcpProxy | null = null;
   /** Generated at the first start, then kept in the record. */
   #mcpProxySecret = randomBytes(32).toString("base64url");
+  #mcpBindingId: string = randomUUID();
 
   constructor(options: GitHubConnectorServiceOptions) {
     this.#app = options.app;
@@ -155,6 +159,7 @@ export class GitHubConnectorService {
     this.#fetch = options.fetch ?? ((url, init) => fetch(url, init));
     this.#platform = GitHubPlatform.layer(this.#fetch, options.openExternal);
     this.#now = options.now ?? Date.now;
+    this.#allowsMcpAgentKey = options.allowsMcpAgentKey;
     this.#botTokens = new GitHubBotTokens({ apiUrl: options.apiUrl, fetch: this.#fetch, now: this.#now });
     registerSecretValue(this.#mcpProxySecret);
   }
@@ -451,21 +456,26 @@ export class GitHubConnectorService {
   ).bind(this);
 
   /**
-   * The bearer that agents send to the GitHub MCP server: the loopback server's own secret, or the
-   * user token when that server did not start.
+   * The loopback bearer for this agent. A policy-scoped request needs the proxy.
    */
 
   readonly mcpAuthorization = Effect.fn("GitHubConnector.mcpAuthorization")(
-    function* (this: GitHubConnectorService): Effect.fn.Return<string | null, GitHubOperationError, GitHubPlatform> {
+    function* (
+      this: GitHubConnectorService,
+      agentId: string | null | undefined,
+    ): Effect.fn.Return<string | null, GitHubOperationError, GitHubPlatform> {
       if (!this.#agentConnected()) return null;
-      return this.#mcpProxy ? this.#mcpProxySecret : yield* this.accessToken();
+      if (this.#mcpProxy) return this.#mcpProxy.bearer(agentId ? mcpOAuthProxyAgentKey(agentId) : undefined);
+      return this.#allowsMcpAgentKey ? null : yield* this.accessToken();
     },
     (operation) => this.#owned(operation),
   ).bind(this);
 
   /** The GitHub MCP server that agents are given, or null while the connection is not active. */
-  mcpServer(): McpServerConfig | null {
+  mcpServer(agentId?: string | null): McpServerConfig | null {
     if (!this.#agentConnected()) return null;
+    const url = this.#mcpProxy?.url(agentId ? mcpOAuthProxyAgentKey(agentId) : undefined);
+    if (!url && this.#allowsMcpAgentKey) return null;
     return {
       id: GITHUB_CONNECTOR_MCP_SERVER_ID,
       name: GITHUB_CONNECTOR_MCP_SERVER_NAME,
@@ -476,9 +486,14 @@ export class GitHubConnectorService {
       env: [],
       envPassthrough: [],
       workingDirectory: "",
-      url: this.#mcpProxy?.url() ?? GITHUB_CONNECTOR_MCP_SERVER_URL,
+      url: url ?? GITHUB_CONNECTOR_MCP_SERVER_URL,
       headers: [],
     };
+  }
+
+  /** Changes when a resumed session needs a different loopback address. */
+  mcpBindingId(): string | null {
+    return this.#mcpProxy ? this.#mcpBindingId : null;
   }
 
   /**
@@ -978,8 +993,7 @@ export class GitHubConnectorService {
   });
 
   /**
-   * Starts the loopback GitHub MCP server on the port it had, so that a resumed session finds it. A
-   * server that cannot start is logged: agents then reach GitHub's server with the user token.
+   * Starts the loopback GitHub MCP server on the port it had, so that a resumed session finds it.
    */
 
   readonly #startMcpProxyEffect = Effect.fn("GitHubConnector.startMcpProxy")(function* (
@@ -993,6 +1007,7 @@ export class GitHubConnectorService {
     const proxy = new GitHubMcpProxy({
       upstreamUrl: GITHUB_CONNECTOR_MCP_SERVER_URL,
       secret: () => this.#mcpProxySecret,
+      ...(this.#allowsMcpAgentKey ? { allowsAgentKey: this.#allowsMcpAgentKey } : {}),
       userToken: () => this.accessToken(),
       botToken: (owner, name) => this.#botTokens.forRepository(owner, name),
       canRead: (owner, name, signal) => this.#canRead(owner, name, signal),
@@ -1008,8 +1023,12 @@ export class GitHubConnectorService {
     }
     const port = attempt5.success;
     this.#mcpProxy = proxy;
-    if (!record || record.mcpProxy?.port === port) return;
-    if (record.mcpProxy) {
+    if (!record) return;
+    if (record.mcpProxy?.port === port && record.mcpProxy.bindingId) {
+      this.#mcpBindingId = record.mcpProxy.bindingId;
+      return;
+    }
+    if (record.mcpProxy && record.mcpProxy.port !== port) {
       // Resumed sessions send the old secret to the old port, where another program now listens.
       this.#mcpProxySecret = randomBytes(32).toString("base64url");
       registerSecretValue(this.#mcpProxySecret);
@@ -1017,7 +1036,7 @@ export class GitHubConnectorService {
     yield* this.#store.write({ ...record, mcpProxy: this.#mcpProxySettings() }).pipe(
       Effect.catch((error) =>
         Effect.sync(() => {
-          logger.warn("The GitHub MCP server port could not be saved.", { cause: toLogValue(error.cause) });
+          logger.warn("The GitHub MCP server binding could not be saved.", { cause: toLogValue(error.cause) });
         }),
       ),
     );
@@ -1026,7 +1045,7 @@ export class GitHubConnectorService {
   #mcpProxySettings(): GitHubConnectorRecord["mcpProxy"] {
     const url = this.#mcpProxy?.url();
     const port = url ? Number(new URL(url).port) : null;
-    return port ? { port, secret: this.#mcpProxySecret } : null;
+    return port ? { port, secret: this.#mcpProxySecret, bindingId: this.#mcpBindingId } : null;
   }
 
   /**

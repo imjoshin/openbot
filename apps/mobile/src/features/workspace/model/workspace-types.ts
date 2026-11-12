@@ -1,3 +1,9 @@
+import type {
+  AgentAccessPolicyTransferMapping,
+  AgentAccessPolicyTransferOptions,
+  AgentAccessPolicyTransferPreview,
+  AgentAccessPolicyTransferSelection,
+} from "@openbot/contracts/agent-access-policy-transfer";
 import type { AttachmentSupport } from "@openbot/contracts/attachment-files";
 import type {
   AddAgentFolderInput,
@@ -484,6 +490,7 @@ export interface MobileWorkspaceContextValue {
   loadAgentMemoryLimit: (serverId: string) => Promise<HostAgentMemoryLimit>;
   setAgentMemoryLimit: (limit: number, serverId: string) => Promise<HostAgentMemoryLimit>;
   /** An owner or admin of an online host that serves `agent-access-v1`. The host checks the role again. */
+  canManageAgentAccessPolicy: (serverId: string) => boolean;
   canManageServerRoles: (serverId: string) => boolean;
   /**
    * A member, not an owner or admin, of an online host that serves `agent-access-v1`: the roles can
@@ -491,6 +498,17 @@ export interface MobileWorkspaceContextValue {
    */
   hasAgentAccessLimits: (serverId: string) => boolean;
   /** The roles of the server and the agents that each one gives its members. */
+  loadAgentAccessPolicies: (
+    serverId: string,
+  ) => Promise<import("@openbot/contracts/agent-access-policy").AgentAccessPolicySnapshot>;
+  previewAgentAccessPolicy: (
+    change: import("@openbot/contracts/agent-access-policy").AgentAccessPolicyMutation,
+    serverId: string,
+  ) => Promise<import("@openbot/contracts/agent-access-policy").AgentAccessPolicyPreview>;
+  applyAgentAccessPolicy: (
+    change: import("@openbot/contracts/agent-access-policy").AgentAccessPolicyMutation,
+    serverId: string,
+  ) => Promise<import("@openbot/contracts/agent-access-policy").AgentAccessPolicyApplyResult>;
   loadServerRoles: (serverId: string) => Promise<AgentAccessSnapshot>;
   /** Replaces all roles. The host refuses a change made from an earlier revision. */
   setServerRoles: (change: AgentAccessChange, serverId: string) => Promise<AgentAccessSnapshot>;
@@ -594,6 +612,18 @@ export interface MobileWorkspaceContextValue {
   ) => Promise<InstanceTransferPreview>;
   /** Creates the chosen agents and adds the settings. The token is spent, also when the import fails. */
   applyInstanceTransfer: (input: ApplyInstanceTransferInput, serverId: string) => Promise<RemoteInstanceTransferResult>;
+  getTransferMapping: (
+    input: AgentAccessPolicyTransferSelection,
+    serverId: string,
+  ) => Promise<AgentAccessPolicyTransferOptions | null>;
+  previewTransferMapping: (
+    input: AgentAccessPolicyTransferMapping,
+    serverId: string,
+  ) => Promise<AgentAccessPolicyTransferPreview>;
+  applyTransferMapping: (
+    input: AgentAccessPolicyTransferMapping,
+    serverId: string,
+  ) => Promise<RemoteInstanceTransferResult>;
   discardInstanceTransfer: (token: string, serverId: string) => Promise<void>;
   /** The named browser profiles of the host, and the agents of its shared profile. */
   loadBrowserProfiles: (serverId: string) => Promise<BrowserProfileList>;
@@ -1162,6 +1192,7 @@ type MobileWorkspaceStateKey =
   | "canManageServerTimezone"
   | "canReadMachineMetrics"
   | "canManageAgentMemoryLimit"
+  | "canManageAgentAccessPolicy"
   | "canManageServerRoles"
   | "canReadServerAudit"
   | "hasAgentAccessLimits"

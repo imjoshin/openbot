@@ -88,6 +88,7 @@ export class McpServerStore {
   constructor(
     private readonly database: OpenBotDatabase,
     private readonly logger: Pick<Logger, "warn"> = createOpenBotLogger("mcp-server-store"),
+    private readonly connectionChanged?: (id: string, created: boolean) => void,
   ) {}
 
   list(): McpServerConfig[] {
@@ -159,6 +160,7 @@ export class McpServerStore {
         now,
         now,
       );
+      this.connectionChanged?.(stored.id, !existing);
       db.exec("COMMIT");
       return stored;
     } catch (error) {
@@ -169,7 +171,16 @@ export class McpServerStore {
   }
 
   remove(mcpServerId: string): void {
-    this.database.connection.prepare("DELETE FROM projection_mcp_servers WHERE mcp_server_id = ?").run(mcpServerId);
+    const db = this.database.connection;
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      db.prepare("DELETE FROM projection_mcp_servers WHERE mcp_server_id = ?").run(mcpServerId);
+      this.connectionChanged?.(mcpServerId, false);
+      db.exec("COMMIT");
+    } catch (error) {
+      if (db.isTransaction) db.exec("ROLLBACK");
+      throw error;
+    }
   }
 
   setEnabled(mcpServerId: string, enabled: boolean, now = new Date().toISOString()): McpServerConfig {
@@ -180,9 +191,20 @@ export class McpServerStore {
     // that runs is the row the user saw and the next read does not turn it off again. Turned off, the
     // row already reads as off, and its stored values stay.
     if (enabled && stored.unreadable.length > 0) return this.save({ ...current, enabled }, now);
-    this.database.connection
-      .prepare("UPDATE projection_mcp_servers SET enabled = ?, updated_at = ? WHERE mcp_server_id = ?")
-      .run(enabled ? 1 : 0, now, mcpServerId);
+    const db = this.database.connection;
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      db.prepare("UPDATE projection_mcp_servers SET enabled = ?, updated_at = ? WHERE mcp_server_id = ?").run(
+        enabled ? 1 : 0,
+        now,
+        mcpServerId,
+      );
+      this.connectionChanged?.(mcpServerId, false);
+      db.exec("COMMIT");
+    } catch (error) {
+      if (db.isTransaction) db.exec("ROLLBACK");
+      throw error;
+    }
     return { ...current, enabled };
   }
 

@@ -184,4 +184,6 @@ export const messages = defineMessages("error.team", {
   "error.team.backgroundProcessesUnsupported": "Background processes are not supported by this connection.",
   "error.team.providerUseUnsupported": "Turning providers on and off is not supported by this connection.",
   "error.team.providerUseInvalid": "This provider does not have an on/off switch.",
+  "error.team.agentAccessPolicyUnsupported": "This server does not support Agent Groups.",
+  "error.team.agentAccessPolicyInvalid": "The Agent Groups request is invalid.",
 });

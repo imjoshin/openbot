@@ -6,7 +6,8 @@
 // A member on a released client is still refused. A member on a current client reads the list, adds a
 // server, and changes, signs in, signs out and removes it. The host refuses the member each change and
 // each sign-in of a server that the owner added, also through a row of the member on the owner's
-// address. Provider sign-ins stay with owners and admins. Who added each server stays after a restart.
+// address. Named MCP errors follow the catalog's access rules. Provider sign-ins stay with owners
+// and admins. Who added each server stays after a restart.
 // Run: `bun run test:mcp-member-access`.
 // Writes .openbot-build/mcp-member-access-e2e/report.json.
 
@@ -15,11 +16,19 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import type { McpServerConfig, McpSignInState, TestMcpServerInput } from "@openbot/contracts/ipc";
+import {
+  type AgentEvent,
+  MCP_SERVERS_CAPABILITY,
+  type McpServerConfig,
+  type McpSignInState,
+  type TeamRealtimeEvent,
+  type TestMcpServerInput,
+} from "@openbot/contracts/ipc";
 import { TEAM_API_ROUTES } from "@openbot/contracts/team-api-routes";
 import {
   TEAM_APP_VERSION_HEADER,
   TEAM_CAPABILITIES_HEADER,
+  TEAM_PROTOCOL_V1_WEBSOCKET,
   TEAM_PROTOCOL_VERSION_HEADER,
 } from "@openbot/contracts/team-protocol";
 import { MCP_MEMBER_ACCESS_CAPABILITY, teamCapabilitiesForProtocol } from "@openbot/contracts/team-protocol/current";
@@ -27,6 +36,7 @@ import { MCP_SIGN_IN_APP_ROUTES } from "@openbot/contracts/team-protocol/mcp-sig
 import { MCP_SIGN_IN_ROUTES } from "@openbot/contracts/team-protocol/mcp-sign-in-v1";
 import { MCP_ROUTES } from "@openbot/contracts/team-protocol/mcp-v1";
 import { SIGN_IN_RELAY_ROUTES } from "@openbot/contracts/team-protocol/sign-in-relay-v1";
+import { decodeTeamProtocolV1CurrentEvent } from "@openbot/contracts/team-protocol/v1-adapter";
 import { TEAM_PROTOCOL_V9 } from "@openbot/contracts/team-protocol/v9";
 import { sourceText } from "@openbot/i18n/source";
 import { plugin } from "bun";
@@ -265,6 +275,50 @@ const CURRENT = teamCapabilitiesForProtocol(TEAM_PROTOCOL_V9);
 /** A released client: the current list without `mcp-member-access-v1`. */
 const RELEASED = CURRENT.filter((capability) => capability !== MCP_MEMBER_ACCESS_CAPABILITY);
 
+function waitForEvent(socket: WebSocket, accept: (event: AgentEvent | TeamRealtimeEvent) => boolean): Promise<void> {
+  return new Promise((ready, reject) => {
+    const stop = () => {
+      socket.removeEventListener("message", message);
+      socket.removeEventListener("close", close);
+    };
+    const close = () => {
+      stop();
+      reject(new Error("The event socket closed before the expected event."));
+    };
+    const message = ({ data }: MessageEvent) => {
+      const decoded = decodeTeamProtocolV1CurrentEvent(JSON.parse(String(data)));
+      if (decoded.kind !== "known" || !accept(decoded.event)) return;
+      stop();
+      ready();
+    };
+    socket.addEventListener("message", message);
+    socket.addEventListener("close", close);
+  });
+}
+
+async function setEventCapabilities(socket: WebSocket, capabilities: readonly string[]): Promise<void> {
+  const scope = (values: readonly string[]) =>
+    JSON.stringify({ type: "agent-event-scope", includeConversations: false, capabilities: values });
+  const withoutSnapshot = capabilities.filter((capability) => capability !== "agent-runtime-snapshots");
+  const snapshot = waitForEvent(socket, (event) => event.type === "runtime-snapshot");
+  socket.send(scope(withoutSnapshot));
+  // Re-enable snapshots to confirm the host has applied the new scope on this socket.
+  socket.send(scope([...withoutSnapshot, "agent-runtime-snapshots"]));
+  await snapshot;
+}
+
+async function openEvents(token: string): Promise<WebSocket> {
+  const socket = new WebSocket(`ws://127.0.0.1:${current().port}${TEAM_API_ROUTES.events}`, [
+    TEAM_PROTOCOL_V1_WEBSOCKET,
+    `openbot-token.${token}`,
+  ]);
+  await new Promise<void>((ready, reject) => {
+    socket.addEventListener("open", () => ready(), { once: true });
+    socket.addEventListener("error", () => reject(new Error("The event socket did not open.")), { once: true });
+  });
+  return socket;
+}
+
 /** One protocol 9 request. A current client sends `mcp-member-access-v1`. */
 async function call(
   method: string,
@@ -337,18 +391,70 @@ function refused(response: { status: number; body: unknown }, message: string, l
 try {
   host = await startHost();
   const ownerToken = await login(OWNER);
-  const memberToken = await step("setup: an owner and a member sign in", async () => {
+  await step("setup: a member joins the host", async () => {
     const invite = await runCauseEffect(current().team.createInvite("member"));
     const joined = await call("POST", TEAM_API_ROUTES.join.server, { body: { inviteToken: invite.token, ...MEMBER } });
     assert.equal(joined.status, 201, `Join returned ${joined.status}.`);
-    return login(MEMBER);
+    return { joined: joined.status };
   });
+  const memberToken = await login(MEMBER);
   const memberId = current()
     .team.listMembers()
     .find((member) => member.username === MEMBER.username)?.id;
   assert.ok(memberId, "The member is not in the team.");
 
   const ownerRow = await step("the owner adds Trello", () => save(ownerToken, httpServer("trello", OWNER_URL)));
+
+  await step("named MCP errors follow current catalog access on each event socket", async () => {
+    const { agents, team } = current();
+    const ownerEvents = await openEvents(ownerToken);
+    const memberEvents = await openEvents(memberToken);
+    const releasedEvents = await openEvents(memberToken);
+    const noCatalogEvents = await openEvents(memberToken);
+    const sockets = [ownerEvents, memberEvents, releasedEvents, noCatalogEvents];
+    try {
+      await Promise.all([
+        setEventCapabilities(ownerEvents, RELEASED),
+        setEventCapabilities(memberEvents, CURRENT),
+        setEventCapabilities(releasedEvents, RELEASED),
+        setEventCapabilities(
+          noCatalogEvents,
+          CURRENT.filter((capability) => capability !== MCP_SERVERS_CAPABILITY),
+        ),
+      ]);
+      const checkAudience = async (phase: string, expected: readonly boolean[]) => {
+        const diagnostic = `The provider could not start "${ownerRow.name}".`;
+        const sentinel = `End of MCP diagnostic check for ${phase}.`;
+        const replies = Promise.all(
+          sockets.map(async (socket) => {
+            const received: string[] = [];
+            await waitForEvent(socket, (event) => {
+              if (event.type !== "error") return false;
+              if (event.code === "mcp_server_not_started") received.push(event.message);
+              return event.code === "fixture_complete" && event.message === sentinel;
+            });
+            return received;
+          }),
+        );
+        agents.emit("event", { type: "error", code: "mcp_server_not_started", message: diagnostic });
+        agents.emit("event", { type: "error", code: "fixture_complete", message: sentinel });
+        assert.deepEqual(
+          await replies,
+          expected.map((allowed) => (allowed ? [diagnostic] : [])),
+        );
+      };
+      await checkAudience("member", [true, true, false, false]);
+      await runCauseEffect(team.updateMember(memberId, { role: "admin" }));
+      await checkAudience("admin", [true, true, true, false]);
+      await runCauseEffect(team.updateMember(memberId, { role: "member" }));
+      await checkAudience("admin role removed", [true, true, false, false]);
+      await setEventCapabilities(memberEvents, RELEASED);
+      await checkAudience("member capability removed", [true, false, false, false]);
+      return { owner: true, admin: true, qualifiedMember: true, revokedRole: true, revokedCapability: true };
+    } finally {
+      for (const socket of sockets) socket.close();
+    }
+  });
 
   await step("a member on a released client is refused, as before", async () => {
     const list = await call("GET", MCP_ROUTES.list, { token: memberToken, capabilities: RELEASED });
@@ -493,9 +599,11 @@ try {
   report.passed = true;
 } finally {
   await stopHost();
-  await rm(root, { recursive: true, force: true });
   mkdirSync(OUT, { recursive: true });
   writeFileSync(join(OUT, "report.json"), `${JSON.stringify(report, null, 2)}\n`);
+  await rm(root, { recursive: true, force: true, maxRetries: 4, retryDelay: 50 }).catch(() => {
+    process.stderr.write("The temporary MCP test profile is still in use.\n");
+  });
   process.stdout.write(`${JSON.stringify({ passed: report.passed, steps: report.steps.length }, null, 2)}\n`);
 }
 process.exit(report.passed ? 0 : 1);

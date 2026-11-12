@@ -17,6 +17,7 @@ import { AGENT_WAIT_SCHEMA_SQL } from "./agent-waits/agent-wait-schema";
 import { BROWSER_PROFILE_SCHEMA_SQL } from "./browser-profiles/browser-profile-schema";
 import { BROWSER_PROXY_SCHEMA_SQL } from "./browser-profiles/browser-proxy-schema";
 import { CHANNEL_SCHEMA_SQL, CHANNEL_SETTINGS_SCHEMA_SQL } from "./channel-schema";
+import { AGENT_ACCESS_POLICY_SCHEMA_SQL } from "./database/agent-access-policy-schema";
 import { AGENT_SKILL_LOADS_SCHEMA_SQL } from "./database/agent-skill-loads-schema";
 import { DELETED_THREAD_MESSAGES_SCHEMA_SQL } from "./database/deleted-thread-messages-schema";
 import { PROVIDER_HISTORY_SCHEMA_SQL } from "./database/provider-history-schema";
@@ -630,6 +631,7 @@ const LATEST_SCHEMA_SQL =
     withRunAddedColumns(V19_CHANNEL_ROUTINE_RUNS_END_SQL),
   ) +
   MCP_SERVERS_SCHEMA_SQL +
+  AGENT_ACCESS_POLICY_SCHEMA_SQL +
   MESSAGING_SCHEMA_SQL +
   PROVIDER_HISTORY_SCHEMA_SQL +
   WEBHOOK_SCHEMA_SQL +
@@ -1021,6 +1023,7 @@ const MIGRATIONS: readonly OpenBotMigration[] = [
     // Every existing memory gets no site, so the agent recalls it as before.
     up: addAgentMemorySite,
   },
+  { version: 61, up: (db) => db.exec(AGENT_ACCESS_POLICY_SCHEMA_SQL) },
 ];
 
 const LATEST_SCHEMA_VERSION = MIGRATIONS[MIGRATIONS.length - 1]?.version ?? BASELINE_SCHEMA_VERSION;

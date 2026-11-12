@@ -801,6 +801,9 @@ export class DrainScheduler {
         if (!this.#hooks.servesModel(agent.model, providerForAgent(agent))) throw new Error(REMOVED_ENDPOINT_MESSAGE);
       };
       yield* drainStep(requireServedModel);
+      yield* this.#threads
+        .prepareAccessPolicyStart(agent.id, new Set(batch.map((item) => item.delivery.id)))
+        .pipe(toDeliveryStartFailed);
       yield* this.#threads.applyPendingRuntimeRefresh(agent, new Set(batch.map((item) => item.delivery.id)));
       releaseRuntimeRefresh = this.#threads.holdRuntimeRefresh(agent.id, laneId !== null);
       const providerRunning = this.#providers.agentClientRunning(agent);

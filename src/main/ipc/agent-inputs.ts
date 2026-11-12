@@ -224,7 +224,7 @@ export function parseSidebarLayoutAction(value: unknown): SidebarLayoutAction {
   }
 }
 
-export function parseCreateAgent(value: unknown): CreateAgentInput {
+export function parseCreateAgent(value: unknown, { allowEmptyDescription = false } = {}): CreateAgentInput {
   if (!isObject(value)) throw new Error("Invalid agent creation request.");
   const avatarHue = value.avatarHue;
   if (!isAvatarSeed(value.avatarSeed)) throw new Error("Invalid avatar seed.");
@@ -235,7 +235,10 @@ export function parseCreateAgent(value: unknown): CreateAgentInput {
   }
   const result: CreateAgentInput = {
     name: requireString(value.name, "name", INPUT_LIMITS.agentName),
-    description: requireString(value.description, "description", INPUT_LIMITS.agentDescription),
+    description:
+      allowEmptyDescription && value.description === ""
+        ? ""
+        : requireString(value.description, "description", INPUT_LIMITS.agentDescription),
     avatarSeed: value.avatarSeed,
     avatarHue,
     ...(avatarColor === undefined ? {} : { avatarColor }),

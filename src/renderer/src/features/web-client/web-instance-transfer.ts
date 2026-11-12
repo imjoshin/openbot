@@ -2,6 +2,11 @@ import { type ClientAgentSummary, resolveRemoteInstanceTransferResult } from "@o
 import { INSTANCE_TRANSFER_REMOTE_BYTES } from "@openbot/contracts/team-protocol/instance-transfer-v1";
 import { runTeamEffect } from "@openbot/team-client";
 import {
+  applyTransferMapping,
+  getTransferMapping,
+  previewTransferMapping,
+} from "@openbot/team-client/team-admin-requests";
+import {
   applyInstanceTransfer,
   discardInstanceTransfer,
   downloadInstanceTransfer,
@@ -11,7 +16,7 @@ import {
 } from "@openbot/team-client/team-api-requests";
 import { currentText } from "@openbot/ui/text";
 import { Effect } from "effect";
-import type { ServerTransferCalls } from "../servers/server-transfer-store";
+import type { ServerTransferCalls, ServerTransferMappingCalls } from "../servers/server-transfer-store";
 import { readBase64 } from "./web-agent-import";
 import { chooseFiles } from "./web-channels-runtime";
 
@@ -69,5 +74,24 @@ export function createWebInstanceTransferCalls(options: {
       runTeamEffect(
         discardInstanceTransfer(options.request(serverId), token).pipe(Effect.mapError((error) => error.cause)),
       ),
+  };
+}
+
+export function createWebInstanceTransferMappingCalls(
+  request: (serverId: string) => TeamApiRequest,
+  listAgents: () => Promise<ClientAgentSummary[]>,
+): ServerTransferMappingCalls {
+  return {
+    getTransferMapping: (input, serverId) =>
+      runTeamEffect(getTransferMapping(request(serverId), input).pipe(Effect.mapError((error) => error.cause))),
+    previewTransferMapping: (input, serverId) =>
+      runTeamEffect(previewTransferMapping(request(serverId), input).pipe(Effect.mapError((error) => error.cause))),
+    async applyTransferMapping(input, serverId) {
+      const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+      const result = await runTeamEffect(
+        applyTransferMapping(request(serverId), input, timezone).pipe(Effect.mapError((error) => error.cause)),
+      );
+      return resolveRemoteInstanceTransferResult(result, await listAgents());
+    },
   };
 }
