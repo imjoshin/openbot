@@ -173,8 +173,11 @@ update delivery, a separate joined desktop, live old-host/non-admin control visi
 two-server switch with a pending request remain unverified. Native scopes and cache exclusions
 were reviewed in source. Native creation selection and cancel were checked; the first-turn
 guarantee was checked in the service and desktop flows. The host harness did not exercise every
-provider runtime. Release builds, broad tests, and mobile type validation remain for CI, as required
-by the repository's local-check limits.
+provider runtime. The pre-commit hook passed mobile type validation. Release builds and broad
+tests remain for CI.
 
-The service E2E scripts are selected in CI. The live UI script is a local check. Screenshots, test
-reports, and the demonstration video are local review artifacts and are not repository assets.
+CI runs the host policy suite and the existing legacy client, MCP member access, and
+provider session checks. Run the full HTTP agent access, MCP OAuth, and instance transfer suites
+locally with `bun scripts/agent-access-e2e.ts`, `bun run test:mcp-oauth`, and
+`bun scripts/instance-transfer-everything-e2e.ts`. The live UI runner, screenshots, local test
+reports, and demo are local review artifacts.

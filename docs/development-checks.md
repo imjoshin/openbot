@@ -119,13 +119,10 @@ Its main jobs are:
 | API | `ubuntu-latest` | `bun run check:api`, then, for a pull request from this repository, upload `apps/auth-api/dist` |
 | Storybook build | `ubuntu-latest` | `bun run build-storybook` |
 
-The Team API and reverse actions job also runs `bun scripts/agent-access-e2e.ts`,
-`bun scripts/agent-access-policy-e2e.ts`, `bun scripts/mcp-oauth-e2e.ts`, and
-`bun scripts/instance-transfer-everything-e2e.ts`. They check Agent Groups authorization,
-provider sessions, revoked MCP routes, released client behavior, and transfer preservation.
-Their JSON reports are included in the job's artifacts. The live desktop and browser check,
-`scripts/agent-groups-ui-e2e.ts`, uses a named local dev instance and saves its report and
-screenshots in `.openbot-build/agent-groups/ui-validation/`.
+The Team API and reverse actions job runs `bun scripts/agent-access-policy-e2e.ts` to check
+Agent Groups on a real host with local provider and MCP stand-ins. The job uploads its JSON
+report. The existing legacy client, MCP member access, and provider session checks cover
+their Agent Groups cases in the same job.
 
 CI uses native GitHub Actions `parallel` groups. Each group waits for all its steps and fails
 if a step fails. The steps have separate logs. The groups run in this order:
